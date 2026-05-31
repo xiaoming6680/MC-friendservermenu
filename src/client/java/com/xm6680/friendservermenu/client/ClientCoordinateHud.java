@@ -16,8 +16,9 @@ import java.util.Locale;
 
 public final class ClientCoordinateHud {
     private static final int MIN_WIDTH = 120;
+    private static final int MIN_HEIGHT = 38;
     private static final int MIN_FALLBACK_WIDTH = 80;
-    private static final double ASPECT_RATIO = 190.0D / 58.0D;
+    private static final int MIN_FALLBACK_HEIGHT = 30;
     private static final HudSettings SETTINGS = new HudSettings();
     private static boolean loaded;
     private static boolean editMode;
@@ -68,10 +69,27 @@ public final class ClientCoordinateHud {
     public static void resizeBy(int steps, int screenWidth, int screenHeight) {
         loadSettings();
         fitSizeToScreen(screenWidth, screenHeight);
-        int maxWidth = maxHudWidth(screenWidth, screenHeight);
-        int minWidth = Math.min(MIN_WIDTH, maxWidth);
-        SETTINGS.width = clamp(SETTINGS.width + steps * 14, minWidth, maxWidth);
-        SETTINGS.height = heightForWidth(SETTINGS.width);
+        double heightRatio = SETTINGS.height / (double) Math.max(1, SETTINGS.width);
+        int nextWidth = clamp(SETTINGS.width + steps * 14, minHudWidth(screenWidth), maxHudWidth(screenWidth));
+        int nextHeight = clamp((int) Math.round(nextWidth * heightRatio), minHudHeight(screenHeight), maxHudHeight(screenHeight));
+        SETTINGS.width = nextWidth;
+        SETTINGS.height = nextHeight;
+        clampPosition(screenWidth, screenHeight);
+        saveSettings();
+    }
+
+    public static void resizeWidthBy(int steps, int screenWidth, int screenHeight) {
+        loadSettings();
+        fitSizeToScreen(screenWidth, screenHeight);
+        SETTINGS.width = clamp(SETTINGS.width + steps * 14, minHudWidth(screenWidth), maxHudWidth(screenWidth));
+        clampPosition(screenWidth, screenHeight);
+        saveSettings();
+    }
+
+    public static void resizeHeightBy(int steps, int screenWidth, int screenHeight) {
+        loadSettings();
+        fitSizeToScreen(screenWidth, screenHeight);
+        SETTINGS.height = clamp(SETTINGS.height + steps * 8, minHudHeight(screenHeight), maxHudHeight(screenHeight));
         clampPosition(screenWidth, screenHeight);
         saveSettings();
     }
@@ -110,9 +128,8 @@ public final class ClientCoordinateHud {
         MinecraftClient client = MinecraftClient.getInstance();
         ClientPlayerEntity player = client.player;
         int textWidth = Math.max(20, width - 14);
-        context.drawText(textRenderer, Text.literal("坐标 HUD"), x + 7, y + 7, 0xFFFFFFFF, true);
         if (player == null) {
-            context.drawText(textRenderer, Text.literal("进入世界后显示当前位置"), x + 7, y + 22, 0xFFC9D4DE, false);
+            context.drawText(textRenderer, Text.literal("进入世界后显示当前位置"), x + 7, y + 8, 0xFFC9D4DE, false);
             return;
         }
 
@@ -121,10 +138,10 @@ public final class ClientCoordinateHud {
         String biome = client.world == null ? "未知群系" : client.world.getBiome(pos).getKey()
                 .map(key -> biomeName(key.getValue().toString()))
                 .orElse("未知群系");
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, dimension + " / " + biome, textWidth)), x + 7, y + 22, 0xFFC9D4DE, false);
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, "X:" + pos.getX() + " Y:" + pos.getY() + " Z:" + pos.getZ(), textWidth)), x + 7, y + 37, 0xFFDDE7F0, false);
-        if (height >= 72) {
-            context.drawText(textRenderer, Text.literal(trim(textRenderer, String.format(Locale.ROOT, "Yaw: %.1f Pitch: %.1f", player.getYaw(), player.getPitch()), textWidth)), x + 7, y + 52, 0xFF9FB0BF, false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, dimension + " / " + biome, textWidth)), x + 7, y + 8, 0xFFC9D4DE, false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, "X:" + pos.getX() + " Y:" + pos.getY() + " Z:" + pos.getZ(), textWidth)), x + 7, y + 23, 0xFFDDE7F0, false);
+        if (height >= 56) {
+            context.drawText(textRenderer, Text.literal(trim(textRenderer, String.format(Locale.ROOT, "Yaw: %.1f Pitch: %.1f", player.getYaw(), player.getPitch()), textWidth)), x + 7, y + 38, 0xFF9FB0BF, false);
         }
     }
 
@@ -253,20 +270,24 @@ public final class ClientCoordinateHud {
     }
 
     private static void fitSizeToScreen(int screenWidth, int screenHeight) {
-        int maxWidth = maxHudWidth(screenWidth, screenHeight);
-        int minWidth = Math.min(MIN_WIDTH, maxWidth);
-        SETTINGS.width = clamp(SETTINGS.width, minWidth, maxWidth);
-        SETTINGS.height = heightForWidth(SETTINGS.width);
+        SETTINGS.width = clamp(SETTINGS.width, minHudWidth(screenWidth), maxHudWidth(screenWidth));
+        SETTINGS.height = clamp(SETTINGS.height, minHudHeight(screenHeight), maxHudHeight(screenHeight));
     }
 
-    private static int maxHudWidth(int screenWidth, int screenHeight) {
-        int availableWidth = Math.max(MIN_FALLBACK_WIDTH, screenWidth - 8);
-        int availableHeightAsWidth = Math.max(MIN_FALLBACK_WIDTH, (int) Math.floor(Math.max(1, screenHeight - 8) * ASPECT_RATIO));
-        return Math.max(MIN_FALLBACK_WIDTH, Math.min(availableWidth, availableHeightAsWidth));
+    private static int minHudWidth(int screenWidth) {
+        return Math.min(MIN_WIDTH, maxHudWidth(screenWidth));
     }
 
-    private static int heightForWidth(int width) {
-        return Math.max(42, (int) Math.round(width / ASPECT_RATIO));
+    private static int maxHudWidth(int screenWidth) {
+        return Math.max(MIN_FALLBACK_WIDTH, screenWidth - 8);
+    }
+
+    private static int minHudHeight(int screenHeight) {
+        return Math.min(MIN_HEIGHT, maxHudHeight(screenHeight));
+    }
+
+    private static int maxHudHeight(int screenHeight) {
+        return Math.max(MIN_FALLBACK_HEIGHT, screenHeight - 8);
     }
 
     private static void clampPosition(int screenWidth, int screenHeight) {

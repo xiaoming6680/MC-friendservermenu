@@ -78,6 +78,7 @@ public class FriendMenuScreen extends Screen {
     private boolean taskHudDragging;
     private boolean coordinateHudDragging;
     private String selectedTaskId = "";
+    private boolean selectedTaskDetailFromHistory;
     private boolean taskInviteListOpen;
     private int currentPositionNoticeTicks;
     private String selectedAdminPlayer = "";
@@ -632,10 +633,8 @@ public class FriendMenuScreen extends Screen {
 
     private int renderTaskDetailPage(DrawContext context, int x, int y, int contentWidth) {
         ClientTask task = findClientTask(selectedTaskId);
-        addButton("返回任务", "", "back_to_tasks", "", true, x, y, 72, 24);
-        if (task != null && isHistoricalTask(task)) {
-            addButton("历史任务", "", "open_task_history", "", true, x + 80, y, 72, 24);
-        }
+        boolean returnToHistory = selectedTaskDetailFromHistory || (task != null && isHistoricalTask(task));
+        addButton(returnToHistory ? "返回" : "返回任务", "", returnToHistory ? "back_to_task_history" : "back_to_tasks", "", true, x, y, returnToHistory ? 58 : 72, 24);
         y += 36;
 
         if (task == null) {
@@ -689,8 +688,11 @@ public class FriendMenuScreen extends Screen {
         y += 16;
         drawTextLine(context, "鼠标放在 HUD 上滚轮缩放，也可以用下面按钮调整。", x, y, contentWidth);
         y += 24;
-        addButton("缩小HUD", "", "task_hud_smaller", "", true, x, y, 72, 24);
-        addButton("放大HUD", "", "task_hud_larger", "", true, x + 80, y, 72, 24);
+        addButton("变窄", "", "task_hud_narrow", "", true, x, y, 50, 24);
+        addButton("变宽", "", "task_hud_wider", "", true, x + 56, y, 50, 24);
+        y += 30;
+        addButton("变矮", "", "task_hud_shorter", "", true, x, y, 50, 24);
+        addButton("变高", "", "task_hud_taller", "", true, x + 56, y, 50, 24);
         y += 36;
         drawTextLine(context, "当前显示：" + ClientTaskHud.selectedTaskTitle(), x, y, contentWidth);
         return y + 22;
@@ -707,28 +709,34 @@ public class FriendMenuScreen extends Screen {
         activeMouseY = mouseY;
 
         int doneWidth = 76;
-        int zoomWidth = 72;
+        int controlWidth = 50;
         int gap = 8;
-        int rowWidth = doneWidth + gap + zoomWidth + gap + zoomWidth;
-        int controlsY = Math.max(42, height / 2 - 12);
+        int rowWidth = controlWidth * 4 + gap * 3;
+        int controlsY = Math.max(42, height / 2 - 18);
         String title = "编辑HUD位置";
-        context.drawText(textRenderer, Text.literal(title), Math.max(8, (width - textRenderer.getWidth(title)) / 2), controlsY - 22, 0xFFFFFFFF, true);
+        context.drawText(textRenderer, Text.literal(title), Math.max(8, (width - textRenderer.getWidth(title)) / 2), controlsY - 24, 0xFFFFFFFF, true);
         if (width >= rowWidth + 24) {
+            addButton("完成编辑", "", "task_hud_done", "", true, (width - doneWidth) / 2, controlsY, doneWidth, 24);
             int controlsX = (width - rowWidth) / 2;
-            addButton("完成编辑", "", "task_hud_done", "", true, controlsX, controlsY, doneWidth, 24);
-            addButton("缩小HUD", "", "task_hud_smaller", "", true, controlsX + doneWidth + gap, controlsY, zoomWidth, 24);
-            addButton("放大HUD", "", "task_hud_larger", "", true, controlsX + doneWidth + gap + zoomWidth + gap, controlsY, zoomWidth, 24);
+            int rowY = controlsY + 30;
+            addButton("变窄", "", "task_hud_narrow", "", true, controlsX, rowY, controlWidth, 24);
+            addButton("变宽", "", "task_hud_wider", "", true, controlsX + controlWidth + gap, rowY, controlWidth, 24);
+            addButton("变矮", "", "task_hud_shorter", "", true, controlsX + (controlWidth + gap) * 2, rowY, controlWidth, 24);
+            addButton("变高", "", "task_hud_taller", "", true, controlsX + (controlWidth + gap) * 3, rowY, controlWidth, 24);
         } else {
-            int controlsX = Math.max(8, (width - zoomWidth) / 2);
-            addButton("完成编辑", "", "task_hud_done", "", true, Math.max(8, (width - doneWidth) / 2), controlsY - 28, doneWidth, 24);
-            addButton("缩小HUD", "", "task_hud_smaller", "", true, controlsX, controlsY, zoomWidth, 24);
-            addButton("放大HUD", "", "task_hud_larger", "", true, controlsX, controlsY + 28, zoomWidth, 24);
+            int pairWidth = controlWidth * 2 + gap;
+            int controlsX = Math.max(8, (width - pairWidth) / 2);
+            addButton("完成编辑", "", "task_hud_done", "", true, Math.max(8, (width - doneWidth) / 2), controlsY, doneWidth, 24);
+            addButton("变窄", "", "task_hud_narrow", "", true, controlsX, controlsY + 30, controlWidth, 24);
+            addButton("变宽", "", "task_hud_wider", "", true, controlsX + controlWidth + gap, controlsY + 30, controlWidth, 24);
+            addButton("变矮", "", "task_hud_shorter", "", true, controlsX, controlsY + 58, controlWidth, 24);
+            addButton("变高", "", "task_hud_taller", "", true, controlsX + controlWidth + gap, controlsY + 58, controlWidth, 24);
         }
         String selectedTitle = "当前显示：" + ClientTaskHud.selectedTaskTitle();
         int selectedTitleWidth = Math.max(40, width - 24);
         String selectedTitleText = textRenderer.trimToWidth(selectedTitle, selectedTitleWidth);
         int selectedTitleX = 12 + Math.max(0, (selectedTitleWidth - textRenderer.getWidth(selectedTitleText)) / 2);
-        int selectedTitleY = controlsY + (width >= rowWidth + 24 ? 34 : 62);
+        int selectedTitleY = controlsY + (width >= rowWidth + 24 ? 64 : 88);
         context.drawText(textRenderer, Text.literal(selectedTitleText), selectedTitleX, selectedTitleY, 0xFFDDE7F0, false);
         renderButtonTooltip(context, mouseX, mouseY, fullLayout);
 
@@ -740,8 +748,11 @@ public class FriendMenuScreen extends Screen {
     private int renderCoordinateHudEditPage(DrawContext context, int x, int y, int contentWidth) {
         addButton("完成编辑", "", "coordinate_hud_done", "", true, x, y, 76, 24);
         y += 34;
-        addButton("缩小HUD", "", "coordinate_hud_smaller", "", true, x, y, 72, 24);
-        addButton("放大HUD", "", "coordinate_hud_larger", "", true, x + 80, y, 72, 24);
+        addButton("变窄", "", "coordinate_hud_narrow", "", true, x, y, 50, 24);
+        addButton("变宽", "", "coordinate_hud_wider", "", true, x + 56, y, 50, 24);
+        y += 30;
+        addButton("变矮", "", "coordinate_hud_shorter", "", true, x, y, 50, 24);
+        addButton("变高", "", "coordinate_hud_taller", "", true, x + 56, y, 50, 24);
         return y + 36;
     }
 
@@ -756,22 +767,28 @@ public class FriendMenuScreen extends Screen {
         activeMouseY = mouseY;
 
         int doneWidth = 76;
-        int zoomWidth = 72;
+        int controlWidth = 50;
         int gap = 8;
-        int rowWidth = doneWidth + gap + zoomWidth + gap + zoomWidth;
-        int controlsY = Math.max(42, height / 2 - 12);
+        int rowWidth = controlWidth * 4 + gap * 3;
+        int controlsY = Math.max(42, height / 2 - 18);
         String title = "编辑坐标HUD位置";
-        context.drawText(textRenderer, Text.literal(title), Math.max(8, (width - textRenderer.getWidth(title)) / 2), controlsY - 22, 0xFFFFFFFF, true);
+        context.drawText(textRenderer, Text.literal(title), Math.max(8, (width - textRenderer.getWidth(title)) / 2), controlsY - 24, 0xFFFFFFFF, true);
         if (width >= rowWidth + 24) {
+            addButton("完成编辑", "", "coordinate_hud_done", "", true, (width - doneWidth) / 2, controlsY, doneWidth, 24);
             int controlsX = (width - rowWidth) / 2;
-            addButton("完成编辑", "", "coordinate_hud_done", "", true, controlsX, controlsY, doneWidth, 24);
-            addButton("缩小HUD", "", "coordinate_hud_smaller", "", true, controlsX + doneWidth + gap, controlsY, zoomWidth, 24);
-            addButton("放大HUD", "", "coordinate_hud_larger", "", true, controlsX + doneWidth + gap + zoomWidth + gap, controlsY, zoomWidth, 24);
+            int rowY = controlsY + 30;
+            addButton("变窄", "", "coordinate_hud_narrow", "", true, controlsX, rowY, controlWidth, 24);
+            addButton("变宽", "", "coordinate_hud_wider", "", true, controlsX + controlWidth + gap, rowY, controlWidth, 24);
+            addButton("变矮", "", "coordinate_hud_shorter", "", true, controlsX + (controlWidth + gap) * 2, rowY, controlWidth, 24);
+            addButton("变高", "", "coordinate_hud_taller", "", true, controlsX + (controlWidth + gap) * 3, rowY, controlWidth, 24);
         } else {
-            int controlsX = Math.max(8, (width - zoomWidth) / 2);
-            addButton("完成编辑", "", "coordinate_hud_done", "", true, Math.max(8, (width - doneWidth) / 2), controlsY - 28, doneWidth, 24);
-            addButton("缩小HUD", "", "coordinate_hud_smaller", "", true, controlsX, controlsY, zoomWidth, 24);
-            addButton("放大HUD", "", "coordinate_hud_larger", "", true, controlsX, controlsY + 28, zoomWidth, 24);
+            int pairWidth = controlWidth * 2 + gap;
+            int controlsX = Math.max(8, (width - pairWidth) / 2);
+            addButton("完成编辑", "", "coordinate_hud_done", "", true, Math.max(8, (width - doneWidth) / 2), controlsY, doneWidth, 24);
+            addButton("变窄", "", "coordinate_hud_narrow", "", true, controlsX, controlsY + 30, controlWidth, 24);
+            addButton("变宽", "", "coordinate_hud_wider", "", true, controlsX + controlWidth + gap, controlsY + 30, controlWidth, 24);
+            addButton("变矮", "", "coordinate_hud_shorter", "", true, controlsX, controlsY + 58, controlWidth, 24);
+            addButton("变高", "", "coordinate_hud_taller", "", true, controlsX + controlWidth + gap, controlsY + 58, controlWidth, 24);
         }
         renderButtonTooltip(context, mouseX, mouseY, fullLayout);
 
@@ -1287,6 +1304,10 @@ public class FriendMenuScreen extends Screen {
             case "coordinate_hud_done" -> "保存坐标 HUD 位置并返回坐标页。";
             case "coordinate_hud_smaller" -> "缩小坐标 HUD。";
             case "coordinate_hud_larger" -> "放大坐标 HUD。";
+            case "coordinate_hud_narrow" -> "只缩小坐标 HUD 宽度，用来调整比例。";
+            case "coordinate_hud_wider" -> "只增加坐标 HUD 宽度，用来调整比例。";
+            case "coordinate_hud_shorter" -> "只缩小坐标 HUD 高度，用来调整比例。";
+            case "coordinate_hud_taller" -> "只增加坐标 HUD 高度，用来调整比例。";
             case "open_add_location" -> "新增一个所有玩家都能看到的公共传送点。";
             case "open_edit_location" -> "修改这个传送点的信息，普通玩家不能改 ID。";
             case "delete_location" -> "删除这个公共传送点，只有创建者或 OP 可以删除。";
@@ -1303,6 +1324,10 @@ public class FriendMenuScreen extends Screen {
             case "task_hud_done" -> "保存 HUD 位置并返回任务页。";
             case "task_hud_smaller" -> "缩小任务 HUD。";
             case "task_hud_larger" -> "放大任务 HUD。";
+            case "task_hud_narrow" -> "只缩小任务 HUD 宽度，用来调整比例。";
+            case "task_hud_wider" -> "只增加任务 HUD 宽度，用来调整比例。";
+            case "task_hud_shorter" -> "只缩小任务 HUD 高度，用来调整比例。";
+            case "task_hud_taller" -> "只增加任务 HUD 高度，用来调整比例。";
             case "task_join" -> "加入后可以参与任务完成确认，并可显示到 HUD。";
             case "task_leave" -> "退出后这个任务不会再显示到你的 HUD。";
             case "task_vote_complete" -> "需要当前任务 50% 玩家点击已完成后，任务才会完成。";
@@ -1371,6 +1396,10 @@ public class FriendMenuScreen extends Screen {
             case "coordinate_hud_done" -> selectPage(Page.COORDINATES);
             case "coordinate_hud_smaller" -> ClientCoordinateHud.resizeBy(-1, width, height);
             case "coordinate_hud_larger" -> ClientCoordinateHud.resizeBy(1, width, height);
+            case "coordinate_hud_narrow" -> ClientCoordinateHud.resizeWidthBy(-1, width, height);
+            case "coordinate_hud_wider" -> ClientCoordinateHud.resizeWidthBy(1, width, height);
+            case "coordinate_hud_shorter" -> ClientCoordinateHud.resizeHeightBy(-1, width, height);
+            case "coordinate_hud_taller" -> ClientCoordinateHud.resizeHeightBy(1, width, height);
             case "open_create_task" -> {
                 taskDraft.resetNew();
                 taskFormMessage = "";
@@ -1379,6 +1408,7 @@ public class FriendMenuScreen extends Screen {
             case "open_task_history" -> selectPage(Page.TASK_HISTORY);
             case "open_edit_task" -> openEditTask(button.argument());
             case "back_to_tasks" -> selectPage(Page.TASKS);
+            case "back_to_task_history" -> selectPage(Page.TASK_HISTORY);
             case "task_toggle_invites" -> taskInviteListOpen = !taskInviteListOpen;
             case "task_toggle_visibility" -> taskDraft.publicTask = !taskDraft.publicTask;
             case "task_submit_create" -> submitTask(false);
@@ -1398,6 +1428,10 @@ public class FriendMenuScreen extends Screen {
             case "task_hud_done" -> selectPage(Page.TASKS);
             case "task_hud_smaller" -> ClientTaskHud.resizeBy(-1, width, height);
             case "task_hud_larger" -> ClientTaskHud.resizeBy(1, width, height);
+            case "task_hud_narrow" -> ClientTaskHud.resizeWidthBy(-1, width, height);
+            case "task_hud_wider" -> ClientTaskHud.resizeWidthBy(1, width, height);
+            case "task_hud_shorter" -> ClientTaskHud.resizeHeightBy(-1, width, height);
+            case "task_hud_taller" -> ClientTaskHud.resizeHeightBy(1, width, height);
             case "task_hud_select" -> ClientTaskHud.selectTask(button.argument());
             case "admin_page" -> selectPage(Page.fromId(button.argument()));
             case "admin_select_player" -> {
@@ -1549,6 +1583,7 @@ public class FriendMenuScreen extends Screen {
             taskFormMessage = "";
         }
         if (page != Page.TASK_DETAIL) {
+            selectedTaskDetailFromHistory = false;
             taskInviteListOpen = false;
         }
         if (page == Page.ADD_LOCATION) {
@@ -1599,8 +1634,10 @@ public class FriendMenuScreen extends Screen {
     }
 
     private void openTaskDetail(String id) {
-        if (findClientTask(id) != null) {
+        ClientTask task = findClientTask(id);
+        if (task != null) {
             selectedTaskId = id;
+            selectedTaskDetailFromHistory = selectedPage == Page.TASK_HISTORY || isHistoricalTask(task);
             taskInviteListOpen = false;
             selectPage(Page.TASK_DETAIL);
         }

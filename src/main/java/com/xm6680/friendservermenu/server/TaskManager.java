@@ -500,19 +500,19 @@ public final class TaskManager {
         player.addExperience(COMPLETION_EXPERIENCE);
         ServerWorld world = player.getEntityWorld();
         double baseX = player.getX();
-        double baseY = player.getY() + 1.1D;
+        double baseY = player.getY() + 2.1D;
         double baseZ = player.getZ();
         double[][] offsets = {{-0.55D, 0.15D}, {0.55D, -0.15D}};
         for (int i = 0; i < offsets.length; i++) {
             double x = baseX + offsets[i][0];
-            double y = baseY + 0.45D + i * 0.2D;
+            double y = baseY + i * 0.35D;
             double z = baseZ + offsets[i][1];
-            world.spawnParticles(ParticleTypes.FIREWORK, x, y, z, 28, 0.3D, 0.35D, 0.3D, 0.08D);
-            world.playSound(null, x, y, z, SoundEvents.ENTITY_FIREWORK_ROCKET_LAUNCH, SoundCategory.PLAYERS, 0.45F, 1.0F + i * 0.08F);
-            world.playSound(null, x, y, z, SoundEvents.ENTITY_FIREWORK_ROCKET_BLAST, SoundCategory.PLAYERS, 0.75F, 1.05F + i * 0.12F);
-            world.playSound(null, x, y, z, SoundEvents.ENTITY_FIREWORK_ROCKET_TWINKLE, SoundCategory.PLAYERS, 0.55F, 1.2F + i * 0.1F);
+            world.spawnParticles(ParticleTypes.FIREWORK, x, y, z, 24, 0.28D, 0.32D, 0.28D, 0.07D);
+            world.playSound(null, x, y, z, SoundEvents.ENTITY_FIREWORK_ROCKET_LAUNCH, SoundCategory.PLAYERS, 0.16F, 1.0F + i * 0.08F);
+            world.playSound(null, x, y, z, SoundEvents.ENTITY_FIREWORK_ROCKET_BLAST, SoundCategory.PLAYERS, 0.22F, 1.05F + i * 0.12F);
+            world.playSound(null, x, y, z, SoundEvents.ENTITY_FIREWORK_ROCKET_TWINKLE, SoundCategory.PLAYERS, 0.18F, 1.2F + i * 0.1F);
         }
-        world.playSound(null, baseX, baseY, baseZ, SoundEvents.ENTITY_PLAYER_LEVELUP, SoundCategory.PLAYERS, 0.35F, 1.6F);
+        world.playSound(null, baseX, baseY, baseZ, SoundEvents.ENTITY_PLAYER_LEVELUP, SoundCategory.PLAYERS, 0.18F, 1.6F);
     }
 
     private static void deliverPendingTaskRewards(ServerPlayerEntity player) {

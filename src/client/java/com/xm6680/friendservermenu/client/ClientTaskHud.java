@@ -15,8 +15,9 @@ import java.util.List;
 
 public final class ClientTaskHud {
     private static final int MIN_WIDTH = 120;
+    private static final int MIN_HEIGHT = 42;
     private static final int MIN_FALLBACK_WIDTH = 80;
-    private static final double ASPECT_RATIO = 190.0D / 58.0D;
+    private static final int MIN_FALLBACK_HEIGHT = 32;
     private static final HudSettings SETTINGS = new HudSettings();
     private static List<HudTask> tasks = List.of();
     private static boolean loaded;
@@ -81,10 +82,27 @@ public final class ClientTaskHud {
     public static void resizeBy(int steps, int screenWidth, int screenHeight) {
         loadSettings();
         fitSizeToScreen(screenWidth, screenHeight);
-        int maxWidth = maxHudWidth(screenWidth, screenHeight);
-        int minWidth = Math.min(MIN_WIDTH, maxWidth);
-        SETTINGS.width = clamp(SETTINGS.width + steps * 14, minWidth, maxWidth);
-        SETTINGS.height = heightForWidth(SETTINGS.width);
+        double heightRatio = SETTINGS.height / (double) Math.max(1, SETTINGS.width);
+        int nextWidth = clamp(SETTINGS.width + steps * 14, minHudWidth(screenWidth), maxHudWidth(screenWidth));
+        int nextHeight = clamp((int) Math.round(nextWidth * heightRatio), minHudHeight(screenHeight), maxHudHeight(screenHeight));
+        SETTINGS.width = nextWidth;
+        SETTINGS.height = nextHeight;
+        clampPosition(screenWidth, screenHeight);
+        saveSettings();
+    }
+
+    public static void resizeWidthBy(int steps, int screenWidth, int screenHeight) {
+        loadSettings();
+        fitSizeToScreen(screenWidth, screenHeight);
+        SETTINGS.width = clamp(SETTINGS.width + steps * 14, minHudWidth(screenWidth), maxHudWidth(screenWidth));
+        clampPosition(screenWidth, screenHeight);
+        saveSettings();
+    }
+
+    public static void resizeHeightBy(int steps, int screenWidth, int screenHeight) {
+        loadSettings();
+        fitSizeToScreen(screenWidth, screenHeight);
+        SETTINGS.height = clamp(SETTINGS.height + steps * 8, minHudHeight(screenHeight), maxHudHeight(screenHeight));
         clampPosition(screenWidth, screenHeight);
         saveSettings();
     }
@@ -158,12 +176,14 @@ public final class ClientTaskHud {
         int textWidth = Math.max(20, width - 14);
         context.drawText(textRenderer, Text.literal(trim(textRenderer, task.title, textWidth)), x + 7, y + 7, 0xFFFFFFFF, true);
         context.drawText(textRenderer, Text.literal("状态：" + statusLabel(task.status) + "  人数：" + task.participantCount), x + 7, y + 22, 0xFFC9D4DE, false);
-        if ("voting".equals(task.status)) {
-            context.drawText(textRenderer, Text.literal("确认：" + task.voteCount + "/" + task.voteThreshold), x + 7, y + 37, 0xFF9BFFB2, false);
-        } else if (task.reward != null && !task.reward.isBlank()) {
-            context.drawText(textRenderer, Text.literal(trim(textRenderer, "奖励：" + task.reward, textWidth)), x + 7, y + 37, 0xFFFFE08A, false);
-        } else if (height >= 58) {
-            context.drawText(textRenderer, Text.literal(trim(textRenderer, task.description, textWidth)), x + 7, y + 37, 0xFF9FB0BF, false);
+        if (height >= 52) {
+            if ("voting".equals(task.status)) {
+                context.drawText(textRenderer, Text.literal("确认：" + task.voteCount + "/" + task.voteThreshold), x + 7, y + 37, 0xFF9BFFB2, false);
+            } else if (task.reward != null && !task.reward.isBlank()) {
+                context.drawText(textRenderer, Text.literal(trim(textRenderer, "奖励：" + task.reward, textWidth)), x + 7, y + 37, 0xFFFFE08A, false);
+            } else if (height >= 58) {
+                context.drawText(textRenderer, Text.literal(trim(textRenderer, task.description, textWidth)), x + 7, y + 37, 0xFF9FB0BF, false);
+            }
         }
     }
 
@@ -246,20 +266,24 @@ public final class ClientTaskHud {
     }
 
     private static void fitSizeToScreen(int screenWidth, int screenHeight) {
-        int maxWidth = maxHudWidth(screenWidth, screenHeight);
-        int minWidth = Math.min(MIN_WIDTH, maxWidth);
-        SETTINGS.width = clamp(SETTINGS.width, minWidth, maxWidth);
-        SETTINGS.height = heightForWidth(SETTINGS.width);
+        SETTINGS.width = clamp(SETTINGS.width, minHudWidth(screenWidth), maxHudWidth(screenWidth));
+        SETTINGS.height = clamp(SETTINGS.height, minHudHeight(screenHeight), maxHudHeight(screenHeight));
     }
 
-    private static int maxHudWidth(int screenWidth, int screenHeight) {
-        int availableWidth = Math.max(MIN_FALLBACK_WIDTH, screenWidth - 8);
-        int availableHeightAsWidth = Math.max(MIN_FALLBACK_WIDTH, (int) Math.floor(Math.max(1, screenHeight - 8) * ASPECT_RATIO));
-        return Math.max(MIN_FALLBACK_WIDTH, Math.min(availableWidth, availableHeightAsWidth));
+    private static int minHudWidth(int screenWidth) {
+        return Math.min(MIN_WIDTH, maxHudWidth(screenWidth));
     }
 
-    private static int heightForWidth(int width) {
-        return Math.max(42, (int) Math.round(width / ASPECT_RATIO));
+    private static int maxHudWidth(int screenWidth) {
+        return Math.max(MIN_FALLBACK_WIDTH, screenWidth - 8);
+    }
+
+    private static int minHudHeight(int screenHeight) {
+        return Math.min(MIN_HEIGHT, maxHudHeight(screenHeight));
+    }
+
+    private static int maxHudHeight(int screenHeight) {
+        return Math.max(MIN_FALLBACK_HEIGHT, screenHeight - 8);
     }
 
     private static void clampPosition(int screenWidth, int screenHeight) {
