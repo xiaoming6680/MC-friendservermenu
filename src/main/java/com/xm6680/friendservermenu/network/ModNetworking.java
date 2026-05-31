@@ -50,8 +50,9 @@ public final class ModNetworking {
     public static void sendMenu(ServerPlayerEntity player, String initialPage) {
         ModConfig config = ModConfigManager.get();
         boolean canUseAdmin = canUseAdmin(player);
+        String page = ModConfigManager.needsInitialization() && canUseAdmin ? "setup" : initialPage;
 
-        ServerPlayNetworking.send(player, new OpenMenuPayload(config.menuTitle, canUseAdmin, initialPage));
+        ServerPlayNetworking.send(player, new OpenMenuPayload(config.menuTitle, canUseAdmin, page));
         sendLiveData(player);
     }
 

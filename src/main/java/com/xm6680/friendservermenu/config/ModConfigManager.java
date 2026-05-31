@@ -40,6 +40,19 @@ public final class ModConfigManager {
         return config;
     }
 
+    public static synchronized boolean needsInitialization() {
+        return !config.initialized;
+    }
+
+    public static synchronized boolean finishInitialization(String menuTitle) {
+        String title = clean(menuTitle, 40);
+        if (!title.isBlank()) {
+            config.menuTitle = title;
+        }
+        config.initialized = true;
+        return save();
+    }
+
     public static synchronized LocationEntry findLocation(String id) {
         if (id == null || id.isBlank()) {
             return null;
@@ -172,7 +185,7 @@ public final class ModConfigManager {
         return -1;
     }
 
-    private static boolean save() {
+    public static synchronized boolean save() {
         try {
             Files.createDirectories(CONFIG_PATH.getParent());
             try (Writer writer = Files.newBufferedWriter(CONFIG_PATH)) {

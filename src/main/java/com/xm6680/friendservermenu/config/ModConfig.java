@@ -5,6 +5,7 @@ import java.util.List;
 
 public class ModConfig {
     public String menuTitle = "小铭的服务器菜单";
+    public boolean initialized;
     public List<LocationEntry> locations = new ArrayList<>();
 
     public static ModConfig defaults() {

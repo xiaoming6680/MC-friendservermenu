@@ -1,6 +1,7 @@
 package com.xm6680.friendservermenu.client.gui;
 
 import com.xm6680.friendservermenu.FriendServerMenuMod;
+import com.xm6680.friendservermenu.client.ClientCoordinateHud;
 import com.xm6680.friendservermenu.client.ClientTaskHud;
 import com.xm6680.friendservermenu.config.LocationEntry;
 import com.xm6680.friendservermenu.network.ActivityTeleportPayload;
@@ -49,6 +50,7 @@ public class FriendMenuScreen extends Screen {
     private final LocationDraft locationDraft = new LocationDraft();
     private final ActivityDraft activityDraft = new ActivityDraft();
     private final TaskDraft taskDraft = new TaskDraft();
+    private final TextInput setupTitleInput = new TextInput(DEFAULT_TITLE, 40);
 
     private String titleText;
     private boolean canUseAdmin;
@@ -72,7 +74,9 @@ public class FriendMenuScreen extends Screen {
     private String locationFormMessage = "";
     private boolean locationFormMessageSuccess;
     private String taskFormMessage = "";
+    private String setupMessage = "";
     private boolean taskHudDragging;
+    private boolean coordinateHudDragging;
     private String selectedTaskId = "";
     private boolean taskInviteListOpen;
     private int currentPositionNoticeTicks;
@@ -84,6 +88,9 @@ public class FriendMenuScreen extends Screen {
         this.canUseAdmin = canUseAdmin;
         this.selectedPage = safe(initialPage).isBlank() ? Page.fromId(lastClosedPageId) : Page.fromId(initialPage);
         if (this.selectedPage.isAdminPage() && !canUseAdmin) {
+            this.selectedPage = Page.TELEPORT;
+        }
+        if (this.selectedPage == Page.SETUP && !canUseAdmin) {
             this.selectedPage = Page.TELEPORT;
         }
         this.activityDraft.reset();
@@ -162,6 +169,10 @@ public class FriendMenuScreen extends Screen {
             renderFullTaskHudEditPage(context, mouseX, mouseY);
             return;
         }
+        if (selectedPage == Page.COORDINATE_HUD_EDIT) {
+            renderFullCoordinateHudEditPage(context, mouseX, mouseY);
+            return;
+        }
 
         Layout layout = layout();
         navScroll = clamp(navScroll, 0, maxScroll(navContentHeight, layout.navHeight()));
@@ -184,9 +195,11 @@ public class FriendMenuScreen extends Screen {
         context.enableScissor(layout.contentX(), layout.contentY(), layout.contentX() + layout.contentWidth(), layout.contentBottom());
         int pageBottom = switch (selectedPage) {
             case TELEPORT -> renderTeleportPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+            case SETUP -> renderSetupPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case ADD_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
             case EDIT_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
             case COORDINATES -> renderCoordinatePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+            case COORDINATE_HUD_EDIT -> renderCoordinateHudEditPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case TASKS -> renderTasksPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case TASK_HISTORY -> renderTaskHistoryPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case TASK_DETAIL -> renderTaskDetailPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
@@ -236,6 +249,24 @@ public class FriendMenuScreen extends Screen {
             }
             return super.mouseClicked(click, doubleClick);
         }
+        if (selectedPage == Page.COORDINATE_HUD_EDIT) {
+            if (click.button() == 0) {
+                for (MenuButton menuButton : buttons) {
+                    if (menuButton.contains(mouseX, mouseY)) {
+                        playClickSound();
+                        runButton(menuButton);
+                        return true;
+                    }
+                }
+                if (ClientCoordinateHud.contains(mouseX, mouseY)) {
+                    coordinateHudDragging = true;
+                    return true;
+                }
+                setFocusedInput(null);
+                return true;
+            }
+            return super.mouseClicked(click, doubleClick);
+        }
 
         if (click.button() == 0) {
             if (closeButtonContains(mouseX, mouseY, layout)) {
@@ -246,6 +277,10 @@ public class FriendMenuScreen extends Screen {
 
             if (ClientTaskHud.isEditMode() && ClientTaskHud.contains(mouseX, mouseY)) {
                 taskHudDragging = true;
+                return true;
+            }
+            if (ClientCoordinateHud.isEditMode() && ClientCoordinateHud.contains(mouseX, mouseY)) {
+                coordinateHudDragging = true;
                 return true;
             }
 
@@ -298,8 +333,18 @@ public class FriendMenuScreen extends Screen {
             }
             return true;
         }
+        if (selectedPage == Page.COORDINATE_HUD_EDIT) {
+            if (ClientCoordinateHud.contains(mouseX, mouseY)) {
+                ClientCoordinateHud.resizeBy(verticalAmount > 0 ? 1 : -1, width, height);
+            }
+            return true;
+        }
         if (ClientTaskHud.isEditMode() && ClientTaskHud.contains(mouseX, mouseY)) {
             ClientTaskHud.resizeBy(verticalAmount > 0 ? 1 : -1, width, height);
+            return true;
+        }
+        if (ClientCoordinateHud.isEditMode() && ClientCoordinateHud.contains(mouseX, mouseY)) {
+            ClientCoordinateHud.resizeBy(verticalAmount > 0 ? 1 : -1, width, height);
             return true;
         }
         int delta = (int) Math.round(verticalAmount * 18.0D);
@@ -320,12 +365,17 @@ public class FriendMenuScreen extends Screen {
             ClientTaskHud.moveBy(horizontalAmount, verticalAmount, width, height);
             return true;
         }
+        if (coordinateHudDragging && ClientCoordinateHud.isEditMode()) {
+            ClientCoordinateHud.moveBy(horizontalAmount, verticalAmount, width, height);
+            return true;
+        }
         return super.mouseDragged(click, horizontalAmount, verticalAmount);
     }
 
     @Override
     public boolean mouseReleased(Click click) {
         taskHudDragging = false;
+        coordinateHudDragging = false;
         return super.mouseReleased(click);
     }
 
@@ -333,6 +383,7 @@ public class FriendMenuScreen extends Screen {
     public void close() {
         rememberLastPage();
         ClientTaskHud.setEditMode(false);
+        ClientCoordinateHud.setEditMode(false);
         super.close();
     }
 
@@ -340,6 +391,7 @@ public class FriendMenuScreen extends Screen {
     public void removed() {
         rememberLastPage();
         ClientTaskHud.setEditMode(false);
+        ClientCoordinateHud.setEditMode(false);
         super.removed();
     }
 
@@ -493,35 +545,45 @@ public class FriendMenuScreen extends Screen {
     private int renderCoordinatePage(DrawContext context, int x, int y, int contentWidth) {
         context.drawText(textRenderer, Text.literal("当前位置"), x, y, 0xFFFFFFFF, true);
         context.drawText(textRenderer, Text.literal(clientCoordinates()), x, y + 18, 0xFFDDE7F0, false);
-        y += 46;
+        context.drawText(textRenderer, Text.literal("当前群系：" + clientBiomeName()), x, y + 34, 0xFFC9D4DE, false);
+        y += 62;
+
+        int hudButtonWidth = Math.max(84, Math.min(112, (contentWidth - 8) / 2));
+        addButton(ClientCoordinateHud.isEnabled() ? "坐标HUD显示中" : "坐标HUD已隐藏", "", "coordinate_hud_toggle", "", true, x, y, hudButtonWidth, 24);
+        addButton("编辑坐标HUD位置", "", "coordinate_hud_edit", "", true, x + hudButtonWidth + 6, y, hudButtonWidth, 24);
+        y += 34;
 
         int buttonWidth = Math.max(68, Math.min(84, (contentWidth - 12) / 3));
         int buttonHeight = 26;
         int currentX = x;
         int currentY = y;
         String[][] actions = {
-                {"复制坐标", "copy_coords", "复制当前坐标和维度到系统剪贴板。"},
-                {"公开坐标", "send_coords_public", "把当前坐标发到聊天栏，并附带绿色传送按钮。"},
-                {"私发坐标", "send_coords_private", "只把当前坐标发给自己，方便保存或查看。"}
+                {"复制坐标", "copy_coords"},
+                {"公开坐标", "send_coords_public"},
+                {"私发坐标", "send_coords_private"}
         };
-        String hoverHint = "";
         for (String[] action : actions) {
             if (currentX + buttonWidth > x + contentWidth) {
                 currentX = x;
                 currentY += buttonHeight + 6;
             }
-            if (activeMouseX >= currentX && activeMouseX < currentX + buttonWidth && activeMouseY >= currentY && activeMouseY < currentY + buttonHeight) {
-                hoverHint = action[2];
-            }
             addButton(action[0], "", action[1], "", "copy_coords".equals(action[1]), currentX, currentY, buttonWidth, buttonHeight);
             currentX += buttonWidth + 6;
         }
-        int bottom = currentY + buttonHeight;
-        if (!hoverHint.isBlank()) {
-            drawTextLine(context, hoverHint, x, bottom + 10, contentWidth);
-            bottom += 26;
+        return currentY + buttonHeight + 8;
+    }
+
+    private int renderSetupPage(DrawContext context, int x, int y, int contentWidth) {
+        context.drawText(textRenderer, Text.literal("初始化菜单"), x, y, 0xFFFFFFFF, true);
+        y += 20;
+        drawTextLine(context, "第一次使用时，请先设置左上角显示的菜单名称。", x, y, contentWidth);
+        y += 24;
+        y = addInput(context, setupTitleInput, "GUI 名称", x, y, contentWidth);
+        addButton("完成初始化", "", "setup_finish", "", true, x, y, 92, 26);
+        if (!setupMessage.isBlank()) {
+            drawInlineStatus(context, setupMessage, x + 102, y + 8, contentWidth - 104, false);
         }
-        return bottom + 8;
+        return y + 38;
     }
 
     private int renderTasksPage(DrawContext context, int x, int y, int contentWidth) {
@@ -543,7 +605,7 @@ public class FriendMenuScreen extends Screen {
         }
 
         for (ClientTask task : activeTasks) {
-            y = renderTaskCard(context, task, x, y, contentWidth);
+            y = renderTaskCard(context, task, x, y, contentWidth, false);
             y += 8;
         }
         return y;
@@ -562,7 +624,7 @@ public class FriendMenuScreen extends Screen {
         }
 
         for (ClientTask task : historyTasks) {
-            y = renderTaskCard(context, task, x, y, contentWidth);
+            y = renderTaskCard(context, task, x, y, contentWidth, true);
             y += 8;
         }
         return y;
@@ -675,10 +737,54 @@ public class FriendMenuScreen extends Screen {
         pageContentHeight = 0;
     }
 
-    private int renderTaskCard(DrawContext context, ClientTask task, int x, int y, int contentWidth) {
+    private int renderCoordinateHudEditPage(DrawContext context, int x, int y, int contentWidth) {
+        addButton("完成编辑", "", "coordinate_hud_done", "", true, x, y, 76, 24);
+        y += 34;
+        addButton("缩小HUD", "", "coordinate_hud_smaller", "", true, x, y, 72, 24);
+        addButton("放大HUD", "", "coordinate_hud_larger", "", true, x + 80, y, 72, 24);
+        return y + 36;
+    }
+
+    private void renderFullCoordinateHudEditPage(DrawContext context, int mouseX, int mouseY) {
+        context.fill(0, 0, width, height, 0xEE0B1016);
+        ClientCoordinateHud.renderPreview(context, textRenderer, width, height);
+
+        Layout fullLayout = new Layout(0, 0, width, height, 0, 0, 0, width, height);
+        activeRenderContext = context;
+        activeRenderLayout = fullLayout;
+        activeMouseX = mouseX;
+        activeMouseY = mouseY;
+
+        int doneWidth = 76;
+        int zoomWidth = 72;
+        int gap = 8;
+        int rowWidth = doneWidth + gap + zoomWidth + gap + zoomWidth;
+        int controlsY = Math.max(42, height / 2 - 12);
+        String title = "编辑坐标HUD位置";
+        context.drawText(textRenderer, Text.literal(title), Math.max(8, (width - textRenderer.getWidth(title)) / 2), controlsY - 22, 0xFFFFFFFF, true);
+        if (width >= rowWidth + 24) {
+            int controlsX = (width - rowWidth) / 2;
+            addButton("完成编辑", "", "coordinate_hud_done", "", true, controlsX, controlsY, doneWidth, 24);
+            addButton("缩小HUD", "", "coordinate_hud_smaller", "", true, controlsX + doneWidth + gap, controlsY, zoomWidth, 24);
+            addButton("放大HUD", "", "coordinate_hud_larger", "", true, controlsX + doneWidth + gap + zoomWidth + gap, controlsY, zoomWidth, 24);
+        } else {
+            int controlsX = Math.max(8, (width - zoomWidth) / 2);
+            addButton("完成编辑", "", "coordinate_hud_done", "", true, Math.max(8, (width - doneWidth) / 2), controlsY - 28, doneWidth, 24);
+            addButton("缩小HUD", "", "coordinate_hud_smaller", "", true, controlsX, controlsY, zoomWidth, 24);
+            addButton("放大HUD", "", "coordinate_hud_larger", "", true, controlsX, controlsY + 28, zoomWidth, 24);
+        }
+        renderButtonTooltip(context, mouseX, mouseY, fullLayout);
+
+        activeRenderContext = null;
+        activeRenderLayout = null;
+        pageContentHeight = 0;
+    }
+
+    private int renderTaskCard(DrawContext context, ClientTask task, int x, int y, int contentWidth, boolean compact) {
         int actionRows = taskActionRows(task, contentWidth);
-        int textLines = 3 + (!safe(task.reward).isBlank() ? 1 : 0) + (!safe(task.description).isBlank() ? 1 : 0);
-        int cardHeight = Math.max(contentWidth < 260 ? 158 : 122, 22 + textLines * 14 + 10 + actionRows * 26);
+        int textLines = 3 + (!safe(task.reward).isBlank() ? 1 : 0) + (!compact && !safe(task.description).isBlank() ? 1 : 0);
+        int minHeight = compact ? (contentWidth < 260 ? 112 : 88) : (contentWidth < 260 ? 158 : 122);
+        int cardHeight = Math.max(minHeight, 22 + textLines * 14 + 10 + actionRows * 26);
         int right = x + contentWidth - 6;
         boolean hovered = activeMouseX >= x && activeMouseX < right && activeMouseY >= y && activeMouseY < y + cardHeight;
         int fillColor = hovered ? 0x8842515E : 0x66303A46;
@@ -702,7 +808,7 @@ public class FriendMenuScreen extends Screen {
             drawTextLine(context, "奖励：" + task.reward, textX, lineY, contentWidth - 18);
             lineY += 14;
         }
-        if (!safe(task.description).isBlank()) {
+        if (!compact && !safe(task.description).isBlank()) {
             drawTextLine(context, task.description, textX, lineY, contentWidth - 18);
         }
 
@@ -802,9 +908,6 @@ public class FriendMenuScreen extends Screen {
         if (cursor.x + width > cursor.right - 8) {
             cursor.x = cursor.rowStart;
             cursor.y += 26;
-        }
-        if (!safe(hoverHint).isBlank() && activeMouseX >= cursor.x && activeMouseX < cursor.x + width && activeMouseY >= cursor.y && activeMouseY < cursor.y + 22) {
-            drawInlineStatus(context, hoverHint, cursor.rowStart, cursor.y - 13, cursor.right - cursor.rowStart, true);
         }
         addButton(title, "", actionId, argument, actionId.startsWith("task_hud") || actionId.startsWith("open_"), cursor.x, cursor.y, width, 22);
         cursor.x += width + 5;
@@ -1175,6 +1278,15 @@ public class FriendMenuScreen extends Screen {
 
     private String buttonHoverHint(MenuButton button) {
         return switch (button.actionId()) {
+            case "setup_finish" -> "保存菜单名称，以后打开 GUI 时显示在左上角。";
+            case "copy_coords" -> "复制当前坐标和维度到系统剪贴板。";
+            case "send_coords_public" -> "把当前坐标发到聊天栏，并附带绿色传送按钮。";
+            case "send_coords_private" -> "只把当前坐标发给自己，方便保存或查看。";
+            case "coordinate_hud_toggle" -> "打开或关闭屏幕上的坐标 HUD。";
+            case "coordinate_hud_edit" -> "进入独立界面，拖动和缩放坐标 HUD。";
+            case "coordinate_hud_done" -> "保存坐标 HUD 位置并返回坐标页。";
+            case "coordinate_hud_smaller" -> "缩小坐标 HUD。";
+            case "coordinate_hud_larger" -> "放大坐标 HUD。";
             case "open_add_location" -> "新增一个所有玩家都能看到的公共传送点。";
             case "open_edit_location" -> "修改这个传送点的信息，普通玩家不能改 ID。";
             case "delete_location" -> "删除这个公共传送点，只有创建者或 OP 可以删除。";
@@ -1236,6 +1348,7 @@ public class FriendMenuScreen extends Screen {
 
     private void runButton(MenuButton button) {
         switch (button.actionId()) {
+            case "setup_finish" -> submitSetup();
             case "open_add_location" -> {
                 locationDraft.resetNew();
                 clearLocationFormMessage();
@@ -1253,6 +1366,11 @@ public class FriendMenuScreen extends Screen {
             case "location_dimension_select" -> locationDraft.setWorld(button.argument());
             case "submit_location" -> submitLocation(false);
             case "submit_location_edit" -> submitLocation(true);
+            case "coordinate_hud_toggle" -> ClientCoordinateHud.toggleEnabled();
+            case "coordinate_hud_edit" -> selectPage(Page.COORDINATE_HUD_EDIT);
+            case "coordinate_hud_done" -> selectPage(Page.COORDINATES);
+            case "coordinate_hud_smaller" -> ClientCoordinateHud.resizeBy(-1, width, height);
+            case "coordinate_hud_larger" -> ClientCoordinateHud.resizeBy(1, width, height);
             case "open_create_task" -> {
                 taskDraft.resetNew();
                 taskFormMessage = "";
@@ -1361,6 +1479,16 @@ public class FriendMenuScreen extends Screen {
         selectPage(Page.TASKS);
     }
 
+    private void submitSetup() {
+        String title = safe(setupTitleInput.value).trim();
+        if (title.isBlank()) {
+            setupMessage = "GUI 名称不能为空。";
+            return;
+        }
+        setupMessage = "";
+        ClientPlayNetworking.send(new MenuActionPayload("setup_finish", title));
+    }
+
     private void inviteTaskPlayer(String argument) {
         String[] parts = safe(argument).split("\\|", 2);
         if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
@@ -1408,7 +1536,9 @@ public class FriendMenuScreen extends Screen {
             page = Page.TELEPORT;
         }
         ClientTaskHud.setEditMode(page == Page.TASK_HUD_EDIT);
+        ClientCoordinateHud.setEditMode(page == Page.COORDINATE_HUD_EDIT);
         taskHudDragging = false;
+        coordinateHudDragging = false;
         selectedPage = page;
         contentScroll = 0;
         setFocusedInput(null);
@@ -1529,6 +1659,9 @@ public class FriendMenuScreen extends Screen {
     }
 
     private List<Page> visiblePages() {
+        if (selectedPage == Page.SETUP) {
+            return List.of(Page.SETUP);
+        }
         List<Page> pages = new ArrayList<>(List.of(Page.TELEPORT, Page.COORDINATES, Page.TASKS, Page.ACTIVITY, Page.STATUS));
         if (canUseAdmin) {
             pages.add(Page.ADMIN);
@@ -1537,8 +1670,14 @@ public class FriendMenuScreen extends Screen {
     }
 
     private Page selectedNavPage() {
+        if (selectedPage == Page.SETUP) {
+            return Page.SETUP;
+        }
         if (selectedPage == Page.ADD_LOCATION || selectedPage == Page.EDIT_LOCATION) {
             return Page.TELEPORT;
+        }
+        if (selectedPage == Page.COORDINATE_HUD_EDIT) {
+            return Page.COORDINATES;
         }
         if (selectedPage == Page.CREATE_TASK || selectedPage == Page.EDIT_TASK || selectedPage == Page.TASK_HISTORY
                 || selectedPage == Page.TASK_DETAIL || selectedPage == Page.TASK_HUD_EDIT) {
@@ -1619,7 +1758,22 @@ public class FriendMenuScreen extends Screen {
         }
 
         BlockPos pos = player.getBlockPos();
-        return "[" + clientDimensionName() + "] X: " + pos.getX() + ", Y: " + pos.getY() + ", Z: " + pos.getZ();
+        return "[" + clientDimensionName() + " / " + clientBiomeName(pos) + "] X: " + pos.getX() + ", Y: " + pos.getY() + ", Z: " + pos.getZ();
+    }
+
+    private String clientBiomeName(BlockPos pos) {
+        ClientWorld world = MinecraftClient.getInstance().world;
+        if (world == null || pos == null) {
+            return "未知群系";
+        }
+        return world.getBiome(pos).getKey()
+                .map(key -> biomeName(key.getValue().toString()))
+                .orElse("未知群系");
+    }
+
+    private String clientBiomeName() {
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        return player == null ? "未知群系" : clientBiomeName(player.getBlockPos());
     }
 
     private String clientDimensionName() {
@@ -1712,6 +1866,76 @@ public class FriendMenuScreen extends Screen {
             case "minecraft:the_nether" -> "下界";
             case "minecraft:the_end" -> "末地";
             default -> safe(id);
+        };
+    }
+
+    private static String biomeName(String id) {
+        return switch (safe(id)) {
+            case "minecraft:badlands" -> "恶地";
+            case "minecraft:bamboo_jungle" -> "竹林";
+            case "minecraft:basalt_deltas" -> "玄武岩三角洲";
+            case "minecraft:beach" -> "沙滩";
+            case "minecraft:birch_forest" -> "白桦森林";
+            case "minecraft:cherry_grove" -> "樱花树林";
+            case "minecraft:cold_ocean" -> "冷水海洋";
+            case "minecraft:crimson_forest" -> "绯红森林";
+            case "minecraft:dark_forest" -> "黑森林";
+            case "minecraft:deep_cold_ocean" -> "冷水深海";
+            case "minecraft:deep_dark" -> "深暗之域";
+            case "minecraft:deep_frozen_ocean" -> "冰冻深海";
+            case "minecraft:deep_lukewarm_ocean" -> "温水深海";
+            case "minecraft:deep_ocean" -> "深海";
+            case "minecraft:desert" -> "沙漠";
+            case "minecraft:dripstone_caves" -> "溶洞";
+            case "minecraft:end_barrens" -> "末地荒地";
+            case "minecraft:end_highlands" -> "末地高地";
+            case "minecraft:end_midlands" -> "末地内陆";
+            case "minecraft:eroded_badlands" -> "风蚀恶地";
+            case "minecraft:flower_forest" -> "繁花森林";
+            case "minecraft:forest" -> "森林";
+            case "minecraft:frozen_ocean" -> "冰冻海洋";
+            case "minecraft:frozen_peaks" -> "冰封山峰";
+            case "minecraft:frozen_river" -> "冰冻河流";
+            case "minecraft:grove" -> "雪林";
+            case "minecraft:ice_spikes" -> "冰刺平原";
+            case "minecraft:jagged_peaks" -> "尖峭山峰";
+            case "minecraft:jungle" -> "丛林";
+            case "minecraft:lukewarm_ocean" -> "温水海洋";
+            case "minecraft:lush_caves" -> "繁茂洞穴";
+            case "minecraft:mangrove_swamp" -> "红树林沼泽";
+            case "minecraft:meadow" -> "草甸";
+            case "minecraft:mushroom_fields" -> "蘑菇岛";
+            case "minecraft:nether_wastes" -> "下界荒地";
+            case "minecraft:ocean" -> "海洋";
+            case "minecraft:old_growth_birch_forest" -> "原始白桦森林";
+            case "minecraft:old_growth_pine_taiga" -> "原始松木针叶林";
+            case "minecraft:old_growth_spruce_taiga" -> "原始云杉针叶林";
+            case "minecraft:pale_garden" -> "苍白花园";
+            case "minecraft:plains" -> "平原";
+            case "minecraft:river" -> "河流";
+            case "minecraft:savanna" -> "热带草原";
+            case "minecraft:savanna_plateau" -> "热带高原";
+            case "minecraft:small_end_islands" -> "末地小型岛屿";
+            case "minecraft:snowy_beach" -> "积雪沙滩";
+            case "minecraft:snowy_plains" -> "雪原";
+            case "minecraft:snowy_slopes" -> "积雪山坡";
+            case "minecraft:snowy_taiga" -> "积雪针叶林";
+            case "minecraft:soul_sand_valley" -> "灵魂沙峡谷";
+            case "minecraft:sparse_jungle" -> "稀疏丛林";
+            case "minecraft:stony_peaks" -> "裸岩山峰";
+            case "minecraft:stony_shore" -> "石岸";
+            case "minecraft:sunflower_plains" -> "向日葵平原";
+            case "minecraft:swamp" -> "沼泽";
+            case "minecraft:taiga" -> "针叶林";
+            case "minecraft:the_end" -> "末地";
+            case "minecraft:warm_ocean" -> "暖水海洋";
+            case "minecraft:warped_forest" -> "诡异森林";
+            case "minecraft:windswept_forest" -> "风袭森林";
+            case "minecraft:windswept_gravelly_hills" -> "风袭沙砾丘陵";
+            case "minecraft:windswept_hills" -> "风袭丘陵";
+            case "minecraft:windswept_savanna" -> "风袭热带草原";
+            case "minecraft:wooded_badlands" -> "疏林恶地";
+            default -> safe(id).isBlank() ? "未知群系" : safe(id);
         };
     }
 
@@ -1830,10 +2054,12 @@ public class FriendMenuScreen extends Screen {
     }
 
     private enum Page {
+        SETUP("setup", "初始化"),
         TELEPORT("teleport", "传送"),
         ADD_LOCATION("add_location", "新增公共传送点"),
         EDIT_LOCATION("edit_location", "编辑公共传送点"),
         COORDINATES("coordinates", "坐标"),
+        COORDINATE_HUD_EDIT("coordinate_hud_edit", "编辑坐标HUD位置"),
         TASKS("tasks", "任务"),
         TASK_HISTORY("task_history", "历史任务"),
         TASK_DETAIL("task_detail", "任务详情"),

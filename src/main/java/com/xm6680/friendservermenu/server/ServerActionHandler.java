@@ -29,6 +29,7 @@ public final class ServerActionHandler {
         }
 
         switch (action) {
+            case "setup_finish" -> finishSetup(player, argument);
             case "teleport_location" -> TeleportManager.teleportToLocation(player, argument);
             case "send_coords_public" -> StatusManager.broadcastCoordinates(player);
             case "send_coords_private" -> StatusManager.sendCoordinatesToSelf(player);
@@ -70,6 +71,19 @@ public final class ServerActionHandler {
         }
 
         ModNetworking.sendLiveData(player);
+    }
+
+    private static void finishSetup(ServerPlayerEntity player, String menuTitle) {
+        if (!ModNetworking.canUseAdmin(player)) {
+            player.sendMessage(Text.literal("只有 OP 可以初始化菜单。"), false);
+            return;
+        }
+        if (!ModConfigManager.finishInitialization(menuTitle)) {
+            player.sendMessage(Text.literal("初始化保存失败，请检查服务器 config 目录权限。"), false);
+            return;
+        }
+        player.sendMessage(Text.literal("菜单初始化完成：" + ModConfigManager.get().menuTitle), false);
+        ModNetworking.sendMenu(player, "teleport");
     }
 
     public static void handleAddLocation(ServerPlayerEntity player, AddLocationPayload payload) {
