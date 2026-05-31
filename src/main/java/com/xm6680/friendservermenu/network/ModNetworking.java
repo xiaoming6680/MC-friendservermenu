@@ -5,6 +5,7 @@ import com.xm6680.friendservermenu.config.ModConfigManager;
 import com.xm6680.friendservermenu.server.ActivityManager;
 import com.xm6680.friendservermenu.server.ServerActionHandler;
 import com.xm6680.friendservermenu.server.StatusManager;
+import com.xm6680.friendservermenu.server.TaskManager;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.command.DefaultPermissions;
@@ -26,6 +27,7 @@ public final class ModNetworking {
         PayloadTypeRegistry.playC2S().register(DeleteLocationPayload.ID, DeleteLocationPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(ActivityTemplatePayload.ID, ActivityTemplatePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(ActivityTeleportPayload.ID, ActivityTeleportPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(TaskActionPayload.ID, TaskActionPayload.CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(MenuActionPayload.ID, (payload, context) ->
                 context.server().execute(() -> ServerActionHandler.handle(context.player(), payload)));
@@ -41,6 +43,8 @@ public final class ModNetworking {
                 context.server().execute(() -> ActivityManager.submitActivity(context.player(), payload.activityJson())));
         ServerPlayNetworking.registerGlobalReceiver(ActivityTeleportPayload.ID, (payload, context) ->
                 context.server().execute(() -> ActivityManager.teleportToActiveActivity(context.player(), payload.activityId())));
+        ServerPlayNetworking.registerGlobalReceiver(TaskActionPayload.ID, (payload, context) ->
+                context.server().execute(() -> TaskManager.handleTaskAction(context.player(), payload)));
     }
 
     public static void sendMenu(ServerPlayerEntity player, String initialPage) {
@@ -53,7 +57,13 @@ public final class ModNetworking {
 
     public static void sendLiveData(ServerPlayerEntity player) {
         ModConfig config = ModConfigManager.get();
-        ServerPlayNetworking.send(player, new MenuDataPayload(config.menuTitle, canUseAdmin(player), ModConfigManager.locationsJson(), ActivityManager.activeActivityJson(player)));
+        ServerPlayNetworking.send(player, new MenuDataPayload(
+                config.menuTitle,
+                canUseAdmin(player),
+                ModConfigManager.locationsJson(),
+                ActivityManager.activeActivityJson(player),
+                TaskManager.visibleTasksJson(player)
+        ));
         sendStatus(player);
     }
 

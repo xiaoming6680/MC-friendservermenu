@@ -1,6 +1,7 @@
 package com.xm6680.friendservermenu.client.gui;
 
 import com.xm6680.friendservermenu.FriendServerMenuMod;
+import com.xm6680.friendservermenu.client.ClientTaskHud;
 import com.xm6680.friendservermenu.config.LocationEntry;
 import com.xm6680.friendservermenu.network.ActivityTeleportPayload;
 import com.xm6680.friendservermenu.network.ActivityTemplatePayload;
@@ -12,6 +13,7 @@ import com.xm6680.friendservermenu.network.MenuActionPayload;
 import com.xm6680.friendservermenu.network.MenuDataPayload;
 import com.xm6680.friendservermenu.network.RequestMenuDataPayload;
 import com.xm6680.friendservermenu.network.ServerStatusPayload;
+import com.xm6680.friendservermenu.network.TaskActionPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.Click;
@@ -42,6 +44,7 @@ public class FriendMenuScreen extends Screen {
     private final List<TextInput> visibleInputs = new ArrayList<>();
     private final LocationDraft locationDraft = new LocationDraft();
     private final ActivityDraft activityDraft = new ActivityDraft();
+    private final TaskDraft taskDraft = new TaskDraft();
 
     private String titleText;
     private boolean canUseAdmin;
@@ -49,6 +52,7 @@ public class FriendMenuScreen extends Screen {
     private List<LocationEntry> locations = List.of();
     private ClientStatus serverStatus = ClientStatus.empty();
     private ActiveActivity activeActivity;
+    private List<ClientTask> tasks = List.of();
     private long activeActivityReceivedAtMillis;
 
     private int navScroll;
@@ -63,6 +67,8 @@ public class FriendMenuScreen extends Screen {
     private int activeMouseY;
     private String locationFormMessage = "";
     private boolean locationFormMessageSuccess;
+    private String taskFormMessage = "";
+    private boolean taskHudDragging;
     private int currentPositionNoticeTicks;
     private String selectedAdminPlayer = "";
 
@@ -99,6 +105,13 @@ public class FriendMenuScreen extends Screen {
         } catch (Exception ignored) {
             this.activeActivity = null;
             this.activeActivityReceivedAtMillis = 0L;
+        }
+
+        try {
+            ClientTask[] parsedTasks = FriendServerMenuMod.GSON.fromJson(safe(payload.tasksJson()), ClientTask[].class);
+            this.tasks = parsedTasks == null ? List.of() : Arrays.asList(parsedTasks);
+        } catch (Exception ignored) {
+            this.tasks = List.of();
         }
     }
 
@@ -162,6 +175,9 @@ public class FriendMenuScreen extends Screen {
             case ADD_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
             case EDIT_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
             case COORDINATES -> renderCoordinatePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+            case TASKS -> renderTasksPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+            case CREATE_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
+            case EDIT_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
             case ACTIVITY -> renderActivityPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case STATUS -> renderStatusPage(context, layout.contentX(), layout.contentY() - contentScroll);
             case ADMIN -> renderAdminPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
@@ -178,6 +194,9 @@ public class FriendMenuScreen extends Screen {
 
         drawScrollbar(context, layout.panelX() + layout.navWidth() - 4, layout.contentY(), 2, layout.navHeight(), navContentHeight, navScroll);
         drawScrollbar(context, layout.contentX() + layout.contentWidth() - 3, layout.contentY(), 2, layout.contentHeight(), pageContentHeight, contentScroll);
+        if (ClientTaskHud.isEditMode()) {
+            ClientTaskHud.renderPreview(context, textRenderer, width, height);
+        }
     }
 
     @Override
@@ -190,6 +209,11 @@ public class FriendMenuScreen extends Screen {
             if (closeButtonContains(mouseX, mouseY, layout)) {
                 playClickSound();
                 close();
+                return true;
+            }
+
+            if (ClientTaskHud.isEditMode() && ClientTaskHud.contains(mouseX, mouseY)) {
+                taskHudDragging = true;
                 return true;
             }
 
@@ -228,6 +252,10 @@ public class FriendMenuScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         Layout layout = layout();
+        if (ClientTaskHud.isEditMode() && ClientTaskHud.contains(mouseX, mouseY)) {
+            ClientTaskHud.resizeBy(verticalAmount > 0 ? 1 : -1, width, height);
+            return true;
+        }
         int delta = (int) Math.round(verticalAmount * 18.0D);
         if (insideNav(mouseX, mouseY, layout)) {
             navScroll = clamp(navScroll - delta, 0, maxScroll(navContentHeight, layout.navHeight()));
@@ -238,6 +266,21 @@ public class FriendMenuScreen extends Screen {
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
+    @Override
+    public boolean mouseDragged(Click click, double horizontalAmount, double verticalAmount) {
+        if (taskHudDragging && ClientTaskHud.isEditMode()) {
+            ClientTaskHud.moveBy(horizontalAmount, verticalAmount, width, height);
+            return true;
+        }
+        return super.mouseDragged(click, horizontalAmount, verticalAmount);
+    }
+
+    @Override
+    public boolean mouseReleased(Click click) {
+        taskHudDragging = false;
+        return super.mouseReleased(click);
     }
 
     @Override
@@ -409,10 +452,124 @@ public class FriendMenuScreen extends Screen {
         }
         int bottom = currentY + buttonHeight;
         if (!hoverHint.isBlank()) {
-            drawTextLine(context, "作用：" + hoverHint, x, bottom + 10, contentWidth);
+            drawTextLine(context, hoverHint, x, bottom + 10, contentWidth);
             bottom += 26;
         }
         return bottom + 8;
+    }
+
+    private int renderTasksPage(DrawContext context, int x, int y, int contentWidth) {
+        int buttonWidth = Math.max(72, Math.min(92, (contentWidth - 12) / 3));
+        addButton("发布任务", "", "open_create_task", "", true, x, y, buttonWidth, 24);
+        addButton(ClientTaskHud.isEnabled() ? "HUD：开" : "HUD：关", "", "task_hud_toggle", "", true, x + buttonWidth + 6, y, buttonWidth, 24);
+        addButton(ClientTaskHud.isEditMode() ? "完成布局" : "拖动HUD", "", "task_hud_edit", "", true, x + (buttonWidth + 6) * 2, y, buttonWidth, 24);
+        y += 32;
+
+        if (ClientTaskHud.isEditMode()) {
+            addButton("缩小HUD", "", "task_hud_smaller", "", true, x, y, buttonWidth, 22);
+            addButton("放大HUD", "", "task_hud_larger", "", true, x + buttonWidth + 6, y, buttonWidth, 22);
+            drawTextLine(context, "拖动屏幕上的任务 HUD 调整位置，滚轮或按钮调整大小。", x, y + 30, contentWidth);
+            y += 50;
+        }
+
+        if (tasks.isEmpty()) {
+            drawTextLine(context, "暂无可见任务。公开任务会显示在这里，私人任务只对成员可见。", x, y, contentWidth);
+            return y + 24;
+        }
+
+        for (ClientTask task : tasks) {
+            y = renderTaskCard(context, task, x, y, contentWidth);
+            y += 8;
+        }
+        return y;
+    }
+
+    private int renderTaskCard(DrawContext context, ClientTask task, int x, int y, int contentWidth) {
+        int cardHeight = contentWidth < 260 ? 166 : 122;
+        int right = x + contentWidth - 6;
+        context.fill(x, y, right, y + cardHeight, 0x66303A46);
+        context.fill(x, y, right, y + 1, 0xFF4C5A66);
+        context.fill(x, y + cardHeight - 1, right, y + cardHeight, 0xFF4C5A66);
+        context.fill(x, y, x + 1, y + cardHeight, 0xFF4C5A66);
+        context.fill(right - 1, y, right, y + cardHeight, 0xFF4C5A66);
+
+        int textX = x + 8;
+        int lineY = y + 8;
+        drawTextLine(context, task.title, textX, lineY, contentWidth - 18);
+        lineY += 14;
+        drawTextLine(context, "状态：" + taskStatusLabel(task.status) + "  可见：" + taskVisibilityLabel(task.visibility) + "  发布者：" + textOr(task.publisherName, "未知"), textX, lineY, contentWidth - 18);
+        lineY += 14;
+        drawTextLine(context, "成员：" + task.participantCount + "  投票：" + task.voteCount + "/" + task.voteThreshold, textX, lineY, contentWidth - 18);
+        lineY += 14;
+        if (!safe(task.reward).isBlank()) {
+            drawTextLine(context, "奖励：" + task.reward, textX, lineY, contentWidth - 18);
+            lineY += 14;
+        }
+        if (!safe(task.description).isBlank()) {
+            drawTextLine(context, task.description, textX, lineY, contentWidth - 18);
+        }
+
+        ButtonCursor cursor = new ButtonCursor(textX, y + cardHeight - (contentWidth < 260 ? 55 : 29), right);
+        int smallWidth = 50;
+        if (task.canJoin) {
+            addTaskCardButton("加入", "task_join", task.id, cursor, smallWidth);
+        }
+        if (task.canLeave) {
+            addTaskCardButton("退出", "task_leave", task.id, cursor, smallWidth);
+        }
+        if (task.canVoteComplete) {
+            addTaskCardButton("voting".equals(task.status) ? "投票通过" : "已完成", "task_vote_complete", task.id, cursor, 70);
+        }
+        if (task.viewerJoined) {
+            addTaskCardButton(ClientTaskHud.isSelectedTask(task.id) ? "HUD中" : "HUD显示", "task_hud_select", task.id, cursor, 62);
+        }
+        if (task.canEdit) {
+            addTaskCardButton("编辑", "open_edit_task", task.id, cursor, smallWidth);
+        }
+        if (task.canEnd) {
+            addTaskCardButton("结束", "task_end", task.id, cursor, smallWidth);
+        }
+        return y + cardHeight;
+    }
+
+    private void addTaskCardButton(String title, String actionId, String argument, ButtonCursor cursor, int width) {
+        if (cursor.x + width > cursor.right - 8) {
+            cursor.x = cursor.rowStart;
+            cursor.y += 26;
+        }
+        addButton(title, "", actionId, argument, actionId.startsWith("task_hud") || actionId.startsWith("open_"), cursor.x, cursor.y, width, 22);
+        cursor.x += width + 5;
+    }
+
+    private int renderTaskFormPage(DrawContext context, int x, int y, int contentWidth, boolean editing) {
+        taskDraft.ensureDefaults();
+        addButton("返回", "", "back_to_tasks", "", true, x, y, 58, 24);
+        y += 36;
+
+        y = addInput(context, taskDraft.title, "任务标题", x, y, contentWidth);
+        y = addInput(context, taskDraft.description, "任务说明", x, y, contentWidth);
+
+        if (!editing || taskDraft.canChangeVisibility) {
+            addButton(taskDraft.publicTask ? "可见性：公开" : "可见性：私人", "", "task_toggle_visibility", "", true, x, y, Math.min(112, contentWidth), 24);
+            y += 36;
+        } else {
+            drawTextLine(context, "可见性：" + (taskDraft.publicTask ? "公开" : "私人"), x, y, contentWidth);
+            y += 22;
+        }
+
+        if (canUseAdmin) {
+            y = addInput(context, taskDraft.reward, "任务奖励（仅 OP 可改）", x, y, contentWidth);
+        } else if (!safe(taskDraft.reward.value).isBlank()) {
+            drawTextLine(context, "奖励：" + taskDraft.reward.value, x, y, contentWidth);
+            y += 22;
+        }
+
+        addButton(editing ? "保存任务" : "发布任务", "", editing ? "task_submit_edit" : "task_submit_create", "", true, x, y, Math.min(92, contentWidth), 26);
+        if (!taskFormMessage.isBlank()) {
+            int messageX = x + Math.min(92, contentWidth) + 8;
+            drawInlineStatus(context, taskFormMessage, messageX, y + 9, x + contentWidth - messageX, false);
+        }
+        return y + 38;
     }
 
     private int renderActivityPage(DrawContext context, int x, int y, int contentWidth) {
@@ -760,6 +917,25 @@ public class FriendMenuScreen extends Screen {
             case "location_dimension_select" -> locationDraft.setWorld(button.argument());
             case "submit_location" -> submitLocation(false);
             case "submit_location_edit" -> submitLocation(true);
+            case "open_create_task" -> {
+                taskDraft.resetNew();
+                taskFormMessage = "";
+                selectPage(Page.CREATE_TASK);
+            }
+            case "open_edit_task" -> openEditTask(button.argument());
+            case "back_to_tasks" -> selectPage(Page.TASKS);
+            case "task_toggle_visibility" -> taskDraft.publicTask = !taskDraft.publicTask;
+            case "task_submit_create" -> submitTask(false);
+            case "task_submit_edit" -> submitTask(true);
+            case "task_join" -> ClientPlayNetworking.send(TaskActionPayload.simple("join", button.argument()));
+            case "task_leave" -> ClientPlayNetworking.send(TaskActionPayload.simple("leave", button.argument()));
+            case "task_vote_complete" -> ClientPlayNetworking.send(TaskActionPayload.simple("vote_complete", button.argument()));
+            case "task_end" -> ClientPlayNetworking.send(TaskActionPayload.simple("end", button.argument()));
+            case "task_hud_toggle" -> ClientTaskHud.toggleEnabled();
+            case "task_hud_edit" -> ClientTaskHud.setEditMode(!ClientTaskHud.isEditMode());
+            case "task_hud_smaller" -> ClientTaskHud.resizeBy(-1, width, height);
+            case "task_hud_larger" -> ClientTaskHud.resizeBy(1, width, height);
+            case "task_hud_select" -> ClientTaskHud.selectTask(button.argument());
             case "admin_page" -> selectPage(Page.fromId(button.argument()));
             case "admin_select_player" -> {
                 selectedAdminPlayer = button.argument();
@@ -820,6 +996,26 @@ public class FriendMenuScreen extends Screen {
         }
     }
 
+    private void submitTask(boolean editing) {
+        TaskSubmission submission = taskDraft.toSubmission(canUseAdmin);
+        if (safe(submission.title).isBlank()) {
+            taskFormMessage = "任务标题不能为空。";
+            return;
+        }
+        if (editing && safe(taskDraft.editingTaskId).isBlank()) {
+            taskFormMessage = "找不到正在编辑的任务。";
+            return;
+        }
+
+        taskFormMessage = "正在提交...";
+        ClientPlayNetworking.send(new TaskActionPayload(
+                editing ? "edit" : "create",
+                editing ? taskDraft.editingTaskId : "",
+                FriendServerMenuMod.GSON.toJson(submission)
+        ));
+        selectPage(Page.TASKS);
+    }
+
     private String validateDraft(LocationEntry location, boolean editing) {
         if (safe(location.name).isBlank()) {
             return "传送点名称不能为空。";
@@ -864,8 +1060,14 @@ public class FriendMenuScreen extends Screen {
         if (page != Page.ADD_LOCATION && page != Page.EDIT_LOCATION) {
             clearLocationFormMessage();
         }
+        if (page != Page.CREATE_TASK && page != Page.EDIT_TASK) {
+            taskFormMessage = "";
+        }
         if (page == Page.ADD_LOCATION) {
             locationDraft.ensureDefaults();
+        }
+        if (page == Page.CREATE_TASK) {
+            taskDraft.ensureDefaults();
         }
         if (page != Page.ADMIN_PLAYER_DETAIL && page != Page.ADMIN_PLAYERS) {
             selectedAdminPlayer = "";
@@ -891,10 +1093,28 @@ public class FriendMenuScreen extends Screen {
         }
     }
 
+    private void openEditTask(String id) {
+        ClientTask task = findClientTask(id);
+        if (task != null) {
+            taskDraft.load(task);
+            taskFormMessage = "";
+            selectPage(Page.EDIT_TASK);
+        }
+    }
+
     private LocationEntry findClientLocation(String id) {
         for (LocationEntry location : locations) {
             if (safe(id).equals(location.id)) {
                 return location;
+            }
+        }
+        return null;
+    }
+
+    private ClientTask findClientTask(String id) {
+        for (ClientTask task : tasks) {
+            if (safe(id).equals(task.id)) {
+                return task;
             }
         }
         return null;
@@ -916,7 +1136,7 @@ public class FriendMenuScreen extends Screen {
     }
 
     private List<Page> visiblePages() {
-        List<Page> pages = new ArrayList<>(List.of(Page.TELEPORT, Page.COORDINATES, Page.ACTIVITY, Page.STATUS));
+        List<Page> pages = new ArrayList<>(List.of(Page.TELEPORT, Page.COORDINATES, Page.TASKS, Page.ACTIVITY, Page.STATUS));
         if (canUseAdmin) {
             pages.add(Page.ADMIN);
         }
@@ -926,6 +1146,9 @@ public class FriendMenuScreen extends Screen {
     private Page selectedNavPage() {
         if (selectedPage == Page.ADD_LOCATION || selectedPage == Page.EDIT_LOCATION) {
             return Page.TELEPORT;
+        }
+        if (selectedPage == Page.CREATE_TASK || selectedPage == Page.EDIT_TASK) {
+            return Page.TASKS;
         }
         return selectedPage.isAdminPage() ? Page.ADMIN : selectedPage;
     }
@@ -1071,6 +1294,18 @@ public class FriendMenuScreen extends Screen {
         };
     }
 
+    private static String taskStatusLabel(String status) {
+        return switch (safe(status)) {
+            case "voting" -> "投票中";
+            case "completed" -> "已完成";
+            default -> "进行中";
+        };
+    }
+
+    private static String taskVisibilityLabel(String visibility) {
+        return "private".equals(safe(visibility)) ? "私人" : "公开";
+    }
+
     private static boolean activityNeedsMeetingPoint(String category) {
         return switch (safe(category)) {
             case "item_give", "maintenance" -> false;
@@ -1159,6 +1394,9 @@ public class FriendMenuScreen extends Screen {
         ADD_LOCATION("add_location", "新增公共传送点"),
         EDIT_LOCATION("edit_location", "编辑公共传送点"),
         COORDINATES("coordinates", "坐标"),
+        TASKS("tasks", "任务"),
+        CREATE_TASK("create_task", "发布任务"),
+        EDIT_TASK("edit_task", "编辑任务"),
         ACTIVITY("activity", "活动"),
         STATUS("status", "状态"),
         ADMIN("admin", "服主管理"),
@@ -1380,6 +1618,96 @@ public class FriendMenuScreen extends Screen {
             submission.maintenanceTimeText = maintenanceTimeText.value;
             submission.maintenanceCountdownSeconds = (int) parseDouble(maintenanceCountdownSeconds.value, 600.0D);
             return submission;
+        }
+    }
+
+    private static class TaskDraft {
+        final TextInput title = new TextInput("完成刷怪塔", 48);
+        final TextInput description = new TextInput("一起完成这个服务器任务。", 180);
+        final TextInput reward = new TextInput("", 120);
+        boolean publicTask = true;
+        boolean initialized;
+        boolean canChangeVisibility = true;
+        String editingTaskId = "";
+
+        void ensureDefaults() {
+            if (!initialized) {
+                resetNew();
+            }
+        }
+
+        void resetNew() {
+            title.value = "完成刷怪塔";
+            description.value = "一起完成这个服务器任务。";
+            reward.value = "";
+            publicTask = true;
+            canChangeVisibility = true;
+            editingTaskId = "";
+            initialized = true;
+        }
+
+        void load(ClientTask task) {
+            title.value = safe(task.title);
+            description.value = safe(task.description);
+            reward.value = safe(task.reward);
+            publicTask = !"private".equals(safe(task.visibility));
+            canChangeVisibility = task.canChangeVisibility;
+            editingTaskId = safe(task.id);
+            initialized = true;
+        }
+
+        TaskSubmission toSubmission(boolean includeReward) {
+            TaskSubmission submission = new TaskSubmission();
+            submission.title = title.value;
+            submission.description = description.value;
+            submission.visibility = publicTask ? "public" : "private";
+            submission.reward = includeReward ? reward.value : "";
+            return submission;
+        }
+    }
+
+    private static class TaskSubmission {
+        String title;
+        String description;
+        String visibility;
+        String reward;
+    }
+
+    private static class ClientTask {
+        String id;
+        String title;
+        String description;
+        String visibility;
+        String publisherName;
+        String reward;
+        String status;
+        String[] participants;
+        int participantCount;
+        int voteCount;
+        int voteThreshold;
+        boolean viewerJoined;
+        boolean viewerPublisher;
+        boolean viewerVotedComplete;
+        boolean canJoin;
+        boolean canLeave;
+        boolean canVoteComplete;
+        boolean canEdit;
+        boolean canChangeVisibility;
+        boolean canEnd;
+        boolean canReward;
+    }
+
+    private static class ButtonCursor {
+        final int rowStart;
+        final int right;
+        int x;
+        int y;
+
+        ButtonCursor(int x, int y, int right) {
+            this.rowStart = x;
+            this.x = x;
+            this.y = y;
+            this.right = right;
         }
     }
 

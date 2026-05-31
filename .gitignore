@@ -6,3 +6,9 @@ out/
 *.iml
 .idea/
 .vscode/
+
+# Local Codex planning/session notes
+task_plan.md
+findings.md
+progress.md
+.planning/

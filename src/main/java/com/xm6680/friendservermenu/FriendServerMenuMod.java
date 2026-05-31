@@ -10,6 +10,7 @@ import com.xm6680.friendservermenu.config.ModConfigManager;
 import com.xm6680.friendservermenu.network.ModNetworking;
 import com.xm6680.friendservermenu.server.AdminActionManager;
 import com.xm6680.friendservermenu.server.ActivityManager;
+import com.xm6680.friendservermenu.server.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -32,7 +33,10 @@ public class FriendServerMenuMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(AdminActionManager::tickFlightGrants);
         ServerTickEvents.END_SERVER_TICK.register(ActivityManager::tickActivities);
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
-                server.execute(() -> ActivityManager.notifyActiveActivityOnJoin(handler.player)));
+                server.execute(() -> {
+                    ActivityManager.notifyActiveActivityOnJoin(handler.player);
+                    TaskManager.sendTasksOnJoin(handler.player);
+                }));
         MenuCommand.register();
         AdminMenuCommand.register();
         ActivityClaimCommand.register();

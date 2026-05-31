@@ -21,6 +21,7 @@ public final class ClientNetworking {
 
         ClientPlayNetworking.registerGlobalReceiver(MenuDataPayload.ID, (payload, context) ->
                 context.client().execute(() -> {
+                    ClientTaskHud.applyTasksJson(payload.tasksJson());
                     if (MinecraftClient.getInstance().currentScreen instanceof FriendMenuScreen screen) {
                         screen.applyMenuData(payload);
                     }
