@@ -104,6 +104,9 @@ public final class ModConfigManager {
 
         boolean idWasBlank = updated.id == null || updated.id.isBlank();
         LocationEntry sanitized = sanitizeLocation(updated);
+        LocationEntry existing = config.locations.get(index);
+        sanitized.creatorUuid = existing.creatorUuid;
+        sanitized.creatorName = existing.creatorName;
         if (!allowIdChange) {
             sanitized.id = originalId;
         } else if (idWasBlank) {
@@ -222,6 +225,8 @@ public final class ModConfigManager {
         sanitized.yaw = location.yaw;
         sanitized.pitch = location.pitch;
         sanitized.description = clean(location.description, 120);
+        sanitized.creatorUuid = clean(location.creatorUuid, 64);
+        sanitized.creatorName = clean(location.creatorName, 40);
         return sanitized;
     }
 

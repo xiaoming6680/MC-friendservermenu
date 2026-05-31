@@ -6,6 +6,7 @@ import com.xm6680.friendservermenu.command.ActivityClaimCommand;
 import com.xm6680.friendservermenu.command.AdminMenuCommand;
 import com.xm6680.friendservermenu.command.CoordinateTeleportCommand;
 import com.xm6680.friendservermenu.command.MenuCommand;
+import com.xm6680.friendservermenu.command.TaskJoinCommand;
 import com.xm6680.friendservermenu.config.ModConfigManager;
 import com.xm6680.friendservermenu.network.ModNetworking;
 import com.xm6680.friendservermenu.server.AdminActionManager;
@@ -41,6 +42,7 @@ public class FriendServerMenuMod implements ModInitializer {
         AdminMenuCommand.register();
         ActivityClaimCommand.register();
         CoordinateTeleportCommand.register();
+        TaskJoinCommand.register();
     }
 
     public static void registerSoundEvents() {

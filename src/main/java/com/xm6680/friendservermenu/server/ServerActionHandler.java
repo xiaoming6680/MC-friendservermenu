@@ -86,6 +86,8 @@ public final class ServerActionHandler {
             sendLocationResult(player, false, worldError);
             return;
         }
+        requested.creatorUuid = player.getUuid().toString();
+        requested.creatorName = player.getName().getString();
 
         ModConfigManager.AddLocationResult result = ModConfigManager.addLocation(requested, ModNetworking.canUseAdmin(player));
         if (!result.success()) {
@@ -125,8 +127,13 @@ public final class ServerActionHandler {
     }
 
     public static void handleDeleteLocation(ServerPlayerEntity player, DeleteLocationPayload payload) {
-        if (!ModNetworking.canUseAdmin(player)) {
-            sendLocationResult(player, false, "只有 OP 可以删除公共传送点。");
+        LocationEntry location = ModConfigManager.findLocation(safe(payload.locationId()));
+        if (location == null) {
+            sendLocationResult(player, false, "传送点不存在：" + safe(payload.locationId()));
+            return;
+        }
+        if (!ModNetworking.canUseAdmin(player) && !isLocationCreator(player, location)) {
+            sendLocationResult(player, false, "只有 OP 或创建者可以删除公共传送点。");
             return;
         }
 
@@ -143,6 +150,12 @@ public final class ServerActionHandler {
 
     private static void sendLocationResult(ServerPlayerEntity player, boolean success, String message) {
         ModNetworking.sendLocationMutationResult(player, success, message);
+    }
+
+    private static boolean isLocationCreator(ServerPlayerEntity player, LocationEntry location) {
+        return player != null
+                && location != null
+                && player.getUuid().toString().equals(safe(location.creatorUuid));
     }
 
     private static String validateWorld(ServerPlayerEntity player, LocationEntry requested) {

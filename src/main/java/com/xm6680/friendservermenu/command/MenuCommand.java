@@ -17,7 +17,7 @@ public final class MenuCommand {
                 dispatcher.register(literal("menu")
                         .executes(context -> {
                             ServerPlayerEntity player = context.getSource().getPlayerOrThrow();
-                            ModNetworking.sendMenu(player, "teleport");
+                            ModNetworking.sendMenu(player, "");
                             return 1;
                         })
                         .then(argument("page", StringArgumentType.word()).executes(context -> {

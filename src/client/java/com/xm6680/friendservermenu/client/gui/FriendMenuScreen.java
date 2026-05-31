@@ -28,8 +28,10 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -39,8 +41,10 @@ public class FriendMenuScreen extends Screen {
     private static final String DEFAULT_TITLE = "小铭的服务器菜单";
     private static final int REFRESH_INTERVAL_TICKS = 20;
     private static final DateTimeFormatter END_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static String lastClosedPageId = Page.TELEPORT.id;
 
     private final List<MenuButton> buttons = new ArrayList<>();
+    private final List<TaskClickArea> taskClickAreas = new ArrayList<>();
     private final List<TextInput> visibleInputs = new ArrayList<>();
     private final LocationDraft locationDraft = new LocationDraft();
     private final ActivityDraft activityDraft = new ActivityDraft();
@@ -69,6 +73,8 @@ public class FriendMenuScreen extends Screen {
     private boolean locationFormMessageSuccess;
     private String taskFormMessage = "";
     private boolean taskHudDragging;
+    private String selectedTaskId = "";
+    private boolean taskInviteListOpen;
     private int currentPositionNoticeTicks;
     private String selectedAdminPlayer = "";
 
@@ -76,7 +82,7 @@ public class FriendMenuScreen extends Screen {
         super(Text.literal(normalizeTitle(titleText)));
         this.titleText = normalizeTitle(titleText);
         this.canUseAdmin = canUseAdmin;
-        this.selectedPage = Page.fromId(initialPage);
+        this.selectedPage = safe(initialPage).isBlank() ? Page.fromId(lastClosedPageId) : Page.fromId(initialPage);
         if (this.selectedPage.isAdminPage() && !canUseAdmin) {
             this.selectedPage = Page.TELEPORT;
         }
@@ -149,7 +155,13 @@ public class FriendMenuScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, width, height, 0x88000000);
         buttons.clear();
+        taskClickAreas.clear();
         visibleInputs.clear();
+
+        if (selectedPage == Page.TASK_HUD_EDIT) {
+            renderFullTaskHudEditPage(context, mouseX, mouseY);
+            return;
+        }
 
         Layout layout = layout();
         navScroll = clamp(navScroll, 0, maxScroll(navContentHeight, layout.navHeight()));
@@ -176,8 +188,11 @@ public class FriendMenuScreen extends Screen {
             case EDIT_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
             case COORDINATES -> renderCoordinatePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case TASKS -> renderTasksPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+            case TASK_HISTORY -> renderTaskHistoryPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+            case TASK_DETAIL -> renderTaskDetailPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case CREATE_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
             case EDIT_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
+            case TASK_HUD_EDIT -> renderTaskHudEditPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case ACTIVITY -> renderActivityPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case STATUS -> renderStatusPage(context, layout.contentX(), layout.contentY() - contentScroll);
             case ADMIN -> renderAdminPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
@@ -194,9 +209,7 @@ public class FriendMenuScreen extends Screen {
 
         drawScrollbar(context, layout.panelX() + layout.navWidth() - 4, layout.contentY(), 2, layout.navHeight(), navContentHeight, navScroll);
         drawScrollbar(context, layout.contentX() + layout.contentWidth() - 3, layout.contentY(), 2, layout.contentHeight(), pageContentHeight, contentScroll);
-        if (ClientTaskHud.isEditMode()) {
-            ClientTaskHud.renderPreview(context, textRenderer, width, height);
-        }
+        renderButtonTooltip(context, mouseX, mouseY, layout);
     }
 
     @Override
@@ -204,6 +217,25 @@ public class FriendMenuScreen extends Screen {
         double mouseX = click.x();
         double mouseY = click.y();
         Layout layout = layout();
+
+        if (selectedPage == Page.TASK_HUD_EDIT) {
+            if (click.button() == 0) {
+                for (MenuButton menuButton : buttons) {
+                    if (menuButton.contains(mouseX, mouseY)) {
+                        playClickSound();
+                        runButton(menuButton);
+                        return true;
+                    }
+                }
+                if (ClientTaskHud.contains(mouseX, mouseY)) {
+                    taskHudDragging = true;
+                    return true;
+                }
+                setFocusedInput(null);
+                return true;
+            }
+            return super.mouseClicked(click, doubleClick);
+        }
 
         if (click.button() == 0) {
             if (closeButtonContains(mouseX, mouseY, layout)) {
@@ -242,6 +274,14 @@ public class FriendMenuScreen extends Screen {
                         return true;
                     }
                 }
+
+                for (TaskClickArea area : taskClickAreas) {
+                    if (taskClickAreaVisible(area, layout) && area.contains(mouseX, mouseY)) {
+                        playClickSound();
+                        openTaskDetail(area.taskId());
+                        return true;
+                    }
+                }
             } else {
                 setFocusedInput(null);
             }
@@ -252,6 +292,12 @@ public class FriendMenuScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         Layout layout = layout();
+        if (selectedPage == Page.TASK_HUD_EDIT) {
+            if (ClientTaskHud.contains(mouseX, mouseY)) {
+                ClientTaskHud.resizeBy(verticalAmount > 0 ? 1 : -1, width, height);
+            }
+            return true;
+        }
         if (ClientTaskHud.isEditMode() && ClientTaskHud.contains(mouseX, mouseY)) {
             ClientTaskHud.resizeBy(verticalAmount > 0 ? 1 : -1, width, height);
             return true;
@@ -281,6 +327,20 @@ public class FriendMenuScreen extends Screen {
     public boolean mouseReleased(Click click) {
         taskHudDragging = false;
         return super.mouseReleased(click);
+    }
+
+    @Override
+    public void close() {
+        rememberLastPage();
+        ClientTaskHud.setEditMode(false);
+        super.close();
+    }
+
+    @Override
+    public void removed() {
+        rememberLastPage();
+        ClientTaskHud.setEditMode(false);
+        super.removed();
     }
 
     @Override
@@ -347,13 +407,14 @@ public class FriendMenuScreen extends Screen {
 
         int cardHeight = 44;
         for (LocationEntry location : locations) {
+            boolean canDeleteLocation = canUseAdmin || isLocationCreator(location);
             String description = safe(location.description) + "  " + dimensionName(location.world) + "  X:" + format(location.x) + " Y:" + format(location.y) + " Z:" + format(location.z);
             if (contentWidth >= 248) {
-                int actionWidth = canUseAdmin ? 98 : 50;
+                int actionWidth = canDeleteLocation ? 98 : 50;
                 int cardWidth = contentWidth - actionWidth;
                 addButton(safe(location.name), description, "teleport_location", safe(location.id), false, x, y, cardWidth, cardHeight);
                 addButton("编辑", "", "open_edit_location", safe(location.id), true, x + cardWidth + 6, y, 42, 20);
-                if (canUseAdmin) {
+                if (canDeleteLocation) {
                     addButton("删除", "", "delete_location", safe(location.id), true, x + cardWidth + 6, y + 24, 42, 20);
                 }
                 y += cardHeight + 7;
@@ -361,7 +422,7 @@ public class FriendMenuScreen extends Screen {
                 addButton(safe(location.name), description, "teleport_location", safe(location.id), false, x, y, contentWidth - 6, cardHeight);
                 y += cardHeight + 6;
                 addButton("编辑", "", "open_edit_location", safe(location.id), true, x, y, 44, 22);
-                if (canUseAdmin) {
+                if (canDeleteLocation) {
                     addButton("删除", "", "delete_location", safe(location.id), true, x + 50, y, 44, 22);
                 }
                 y += 29;
@@ -380,22 +441,27 @@ public class FriendMenuScreen extends Screen {
         }
         y += 36;
 
+        context.drawText(textRenderer, Text.literal("基础信息"), x, y, 0xFFFFFFFF, true);
+        y += 16;
         y = addInput(context, locationDraft.name, "传送点名称", x, y, contentWidth);
         if (canUseAdmin) {
             y = addInput(context, locationDraft.id, "传送点 ID", x, y, contentWidth);
-        } else {
-            context.drawText(textRenderer, Text.literal("传送点 ID 将由服务器自动生成。"), x, y + 4, 0xFF9FB0BF, false);
-            y += 24;
         }
         y = addInput(context, locationDraft.description, "描述", x, y, contentWidth);
         y = addDimensionDropdown(context, x, y, contentWidth);
 
+        context.drawText(textRenderer, Text.literal("位置坐标"), x, y, 0xFFFFFFFF, true);
+        y += 16;
         y = addCoordinateInput(context, locationDraft.x, "X 坐标", "x", x, y, contentWidth);
         y = addCoordinateInput(context, locationDraft.y, "Y 坐标", "y", x, y, contentWidth);
         y = addCoordinateInput(context, locationDraft.z, "Z 坐标", "z", x, y, contentWidth);
 
-        int half = Math.max(80, (contentWidth - 8) / 2);
-        y = addInputRow(context, locationDraft.yaw, "yaw", x, y, half, locationDraft.pitch, "pitch", x + half + 8, half);
+        if (canUseAdmin) {
+            context.drawText(textRenderer, Text.literal("朝向"), x, y, 0xFFFFFFFF, true);
+            y += 16;
+            int half = Math.max(80, (contentWidth - 8) / 2);
+            y = addInputRow(context, locationDraft.yaw, "yaw", x, y, half, locationDraft.pitch, "pitch", x + half + 8, half);
+        }
 
         int submitWidth = editing ? 96 : 120;
         addButton(editing ? "保存修改" : "提交传送点", "", editing ? "submit_location_edit" : "submit_location", "", true, x, y, Math.min(submitWidth, contentWidth), 28);
@@ -459,39 +525,170 @@ public class FriendMenuScreen extends Screen {
     }
 
     private int renderTasksPage(DrawContext context, int x, int y, int contentWidth) {
-        int buttonWidth = Math.max(72, Math.min(92, (contentWidth - 12) / 3));
+        int buttonWidth = Math.max(72, Math.min(100, (contentWidth - 8) / 2));
         addButton("发布任务", "", "open_create_task", "", true, x, y, buttonWidth, 24);
-        addButton(ClientTaskHud.isEnabled() ? "HUD：开" : "HUD：关", "", "task_hud_toggle", "", true, x + buttonWidth + 6, y, buttonWidth, 24);
-        addButton(ClientTaskHud.isEditMode() ? "完成布局" : "拖动HUD", "", "task_hud_edit", "", true, x + (buttonWidth + 6) * 2, y, buttonWidth, 24);
-        y += 32;
+        addButton("历史任务", "", "open_task_history", "", true, x + buttonWidth + 6, y, buttonWidth, 24);
+        addButton(ClientTaskHud.isEnabled() ? "HUD显示中" : "HUD已隐藏", "", "task_hud_toggle", "", true, x, y + 30, buttonWidth, 24);
+        addButton("编辑HUD位置", "", "task_hud_edit", "", true, x + buttonWidth + 6, y + 30, buttonWidth, 24);
+        y += 62;
 
-        if (ClientTaskHud.isEditMode()) {
-            addButton("缩小HUD", "", "task_hud_smaller", "", true, x, y, buttonWidth, 22);
-            addButton("放大HUD", "", "task_hud_larger", "", true, x + buttonWidth + 6, y, buttonWidth, 22);
-            drawTextLine(context, "拖动屏幕上的任务 HUD 调整位置，滚轮或按钮调整大小。", x, y + 30, contentWidth);
-            y += 50;
-        }
-
-        if (tasks.isEmpty()) {
-            drawTextLine(context, "暂无可见任务。公开任务会显示在这里，私人任务只对成员可见。", x, y, contentWidth);
+        List<ClientTask> activeTasks = tasks.stream()
+                .filter(task -> !isHistoricalTask(task))
+                .toList();
+        if (activeTasks.isEmpty()) {
+            drawTextLine(context, "暂无进行中的任务。有什么目标都可以在这里写出来！", x, y, contentWidth);
+            y += 16;
+            drawTextLine(context, "可以多多发布任务，腐竹看到可能会在任务完成时给予丰厚奖励！", x, y, contentWidth);
             return y + 24;
         }
 
-        for (ClientTask task : tasks) {
+        for (ClientTask task : activeTasks) {
             y = renderTaskCard(context, task, x, y, contentWidth);
             y += 8;
         }
         return y;
     }
 
+    private int renderTaskHistoryPage(DrawContext context, int x, int y, int contentWidth) {
+        addButton("返回任务", "", "back_to_tasks", "", true, x, y, 72, 24);
+        y += 32;
+
+        List<ClientTask> historyTasks = tasks.stream()
+                .filter(task -> isHistoricalTask(task) && task.viewerJoined)
+                .toList();
+        if (historyTasks.isEmpty()) {
+            drawTextLine(context, "暂无你参与过的历史任务。", x, y, contentWidth);
+            return y + 24;
+        }
+
+        for (ClientTask task : historyTasks) {
+            y = renderTaskCard(context, task, x, y, contentWidth);
+            y += 8;
+        }
+        return y;
+    }
+
+    private int renderTaskDetailPage(DrawContext context, int x, int y, int contentWidth) {
+        ClientTask task = findClientTask(selectedTaskId);
+        addButton("返回任务", "", "back_to_tasks", "", true, x, y, 72, 24);
+        if (task != null && isHistoricalTask(task)) {
+            addButton("历史任务", "", "open_task_history", "", true, x + 80, y, 72, 24);
+        }
+        y += 36;
+
+        if (task == null) {
+            drawTextLine(context, "找不到这个任务，可能已经结束或不可见。", x, y, contentWidth);
+            return y + 24;
+        }
+
+        drawTextLine(context, task.title, x, y, contentWidth);
+        y += 16;
+        drawTextLine(context, "状态：" + taskStatusLabel(task.status) + "  可见：" + taskVisibilityLabel(task.visibility), x, y, contentWidth);
+        y += 14;
+        drawTextLine(context, "发布者：" + textOr(task.publisherName, "未知") + "  成员：" + task.participantCount + "  完成确认：" + task.voteCount + "/" + task.voteThreshold, x, y, contentWidth);
+        y += 14;
+        if (!safe(task.reward).isBlank()) {
+            drawTextLine(context, "奖励：" + task.reward, x, y, contentWidth);
+            y += 14;
+        }
+        if (!safe(task.description).isBlank()) {
+            drawTextLine(context, "说明：" + task.description, x, y, contentWidth);
+            y += 18;
+        }
+
+        context.drawText(textRenderer, Text.literal("已加入玩家"), x, y, 0xFFFFFFFF, true);
+        y += 16;
+        String[] participants = task.participants == null ? new String[0] : task.participants;
+        if (participants.length == 0) {
+            drawTextLine(context, "暂无玩家。", x, y, contentWidth);
+            y += 16;
+        } else {
+            for (String participant : participants) {
+                drawTextLine(context, "- " + participant, x + 4, y, contentWidth - 4);
+                y += 14;
+            }
+        }
+
+        if (task.canInvite) {
+            y += 4;
+            addButton(taskInviteListOpen ? "收起邀请列表" : "邀请玩家加入", "", "task_toggle_invites", "", true, x, y, 96, 24);
+            y += 34;
+            if (taskInviteListOpen) {
+                y = renderInvitePlayerButtons(context, task, x, y, contentWidth);
+            }
+        }
+        return y;
+    }
+
+    private int renderTaskHudEditPage(DrawContext context, int x, int y, int contentWidth) {
+        addButton("完成编辑", "", "task_hud_done", "", true, x, y, 76, 24);
+        y += 34;
+        drawTextLine(context, "拖动屏幕上的任务 HUD 调整位置。", x, y, contentWidth);
+        y += 16;
+        drawTextLine(context, "鼠标放在 HUD 上滚轮缩放，也可以用下面按钮调整。", x, y, contentWidth);
+        y += 24;
+        addButton("缩小HUD", "", "task_hud_smaller", "", true, x, y, 72, 24);
+        addButton("放大HUD", "", "task_hud_larger", "", true, x + 80, y, 72, 24);
+        y += 36;
+        drawTextLine(context, "当前显示：" + ClientTaskHud.selectedTaskTitle(), x, y, contentWidth);
+        return y + 22;
+    }
+
+    private void renderFullTaskHudEditPage(DrawContext context, int mouseX, int mouseY) {
+        context.fill(0, 0, width, height, 0xEE0B1016);
+        ClientTaskHud.renderPreview(context, textRenderer, width, height);
+
+        Layout fullLayout = new Layout(0, 0, width, height, 0, 0, 0, width, height);
+        activeRenderContext = context;
+        activeRenderLayout = fullLayout;
+        activeMouseX = mouseX;
+        activeMouseY = mouseY;
+
+        int doneWidth = 76;
+        int zoomWidth = 72;
+        int gap = 8;
+        int rowWidth = doneWidth + gap + zoomWidth + gap + zoomWidth;
+        int controlsY = Math.max(42, height / 2 - 12);
+        String title = "编辑HUD位置";
+        context.drawText(textRenderer, Text.literal(title), Math.max(8, (width - textRenderer.getWidth(title)) / 2), controlsY - 22, 0xFFFFFFFF, true);
+        if (width >= rowWidth + 24) {
+            int controlsX = (width - rowWidth) / 2;
+            addButton("完成编辑", "", "task_hud_done", "", true, controlsX, controlsY, doneWidth, 24);
+            addButton("缩小HUD", "", "task_hud_smaller", "", true, controlsX + doneWidth + gap, controlsY, zoomWidth, 24);
+            addButton("放大HUD", "", "task_hud_larger", "", true, controlsX + doneWidth + gap + zoomWidth + gap, controlsY, zoomWidth, 24);
+        } else {
+            int controlsX = Math.max(8, (width - zoomWidth) / 2);
+            addButton("完成编辑", "", "task_hud_done", "", true, Math.max(8, (width - doneWidth) / 2), controlsY - 28, doneWidth, 24);
+            addButton("缩小HUD", "", "task_hud_smaller", "", true, controlsX, controlsY, zoomWidth, 24);
+            addButton("放大HUD", "", "task_hud_larger", "", true, controlsX, controlsY + 28, zoomWidth, 24);
+        }
+        String selectedTitle = "当前显示：" + ClientTaskHud.selectedTaskTitle();
+        int selectedTitleWidth = Math.max(40, width - 24);
+        String selectedTitleText = textRenderer.trimToWidth(selectedTitle, selectedTitleWidth);
+        int selectedTitleX = 12 + Math.max(0, (selectedTitleWidth - textRenderer.getWidth(selectedTitleText)) / 2);
+        int selectedTitleY = controlsY + (width >= rowWidth + 24 ? 34 : 62);
+        context.drawText(textRenderer, Text.literal(selectedTitleText), selectedTitleX, selectedTitleY, 0xFFDDE7F0, false);
+        renderButtonTooltip(context, mouseX, mouseY, fullLayout);
+
+        activeRenderContext = null;
+        activeRenderLayout = null;
+        pageContentHeight = 0;
+    }
+
     private int renderTaskCard(DrawContext context, ClientTask task, int x, int y, int contentWidth) {
-        int cardHeight = contentWidth < 260 ? 166 : 122;
+        int actionRows = taskActionRows(task, contentWidth);
+        int textLines = 3 + (!safe(task.reward).isBlank() ? 1 : 0) + (!safe(task.description).isBlank() ? 1 : 0);
+        int cardHeight = Math.max(contentWidth < 260 ? 158 : 122, 22 + textLines * 14 + 10 + actionRows * 26);
         int right = x + contentWidth - 6;
-        context.fill(x, y, right, y + cardHeight, 0x66303A46);
-        context.fill(x, y, right, y + 1, 0xFF4C5A66);
-        context.fill(x, y + cardHeight - 1, right, y + cardHeight, 0xFF4C5A66);
-        context.fill(x, y, x + 1, y + cardHeight, 0xFF4C5A66);
-        context.fill(right - 1, y, right, y + cardHeight, 0xFF4C5A66);
+        boolean hovered = activeMouseX >= x && activeMouseX < right && activeMouseY >= y && activeMouseY < y + cardHeight;
+        int fillColor = hovered ? 0x8842515E : 0x66303A46;
+        int borderColor = hovered ? 0xFF7FC2FF : 0xFF4C5A66;
+        context.fill(x, y, right, y + cardHeight, fillColor);
+        context.fill(x, y, right, y + 1, borderColor);
+        context.fill(x, y + cardHeight - 1, right, y + cardHeight, borderColor);
+        context.fill(x, y, x + 1, y + cardHeight, borderColor);
+        context.fill(right - 1, y, right, y + cardHeight, borderColor);
+        taskClickAreas.add(new TaskClickArea(task.id, x, y, right - x, Math.max(24, cardHeight - actionRows * 26 - 8)));
 
         int textX = x + 8;
         int lineY = y + 8;
@@ -499,7 +696,7 @@ public class FriendMenuScreen extends Screen {
         lineY += 14;
         drawTextLine(context, "状态：" + taskStatusLabel(task.status) + "  可见：" + taskVisibilityLabel(task.visibility) + "  发布者：" + textOr(task.publisherName, "未知"), textX, lineY, contentWidth - 18);
         lineY += 14;
-        drawTextLine(context, "成员：" + task.participantCount + "  投票：" + task.voteCount + "/" + task.voteThreshold, textX, lineY, contentWidth - 18);
+        drawTextLine(context, "成员：" + task.participantCount + "  完成确认：" + task.voteCount + "/" + task.voteThreshold, textX, lineY, contentWidth - 18);
         lineY += 14;
         if (!safe(task.reward).isBlank()) {
             drawTextLine(context, "奖励：" + task.reward, textX, lineY, contentWidth - 18);
@@ -509,33 +706,105 @@ public class FriendMenuScreen extends Screen {
             drawTextLine(context, task.description, textX, lineY, contentWidth - 18);
         }
 
-        ButtonCursor cursor = new ButtonCursor(textX, y + cardHeight - (contentWidth < 260 ? 55 : 29), right);
+        ButtonCursor cursor = new ButtonCursor(textX, y + cardHeight - actionRows * 26 - 4, right);
         int smallWidth = 50;
+        boolean activeTask = !isHistoricalTask(task);
         if (task.canJoin) {
-            addTaskCardButton("加入", "task_join", task.id, cursor, smallWidth);
+            addTaskCardButton(context, "加入", "task_join", task.id, cursor, smallWidth, "");
         }
         if (task.canLeave) {
-            addTaskCardButton("退出", "task_leave", task.id, cursor, smallWidth);
+            addTaskCardButton(context, "退出", "task_leave", task.id, cursor, smallWidth, "");
         }
         if (task.canVoteComplete) {
-            addTaskCardButton("voting".equals(task.status) ? "投票通过" : "已完成", "task_vote_complete", task.id, cursor, 70);
+            addTaskCardButton(context, "已完成", "task_vote_complete", task.id, cursor, 70, "需要当前任务 50% 玩家点击已完成后，任务才会完成。");
         }
-        if (task.viewerJoined) {
-            addTaskCardButton(ClientTaskHud.isSelectedTask(task.id) ? "HUD中" : "HUD显示", "task_hud_select", task.id, cursor, 62);
+        if (task.viewerJoined && activeTask) {
+            addTaskCardButton(context, ClientTaskHud.isSelectedTask(task.id) ? "HUD显示中" : "显示到HUD", "task_hud_select", task.id, cursor, 74, "");
         }
         if (task.canEdit) {
-            addTaskCardButton("编辑", "open_edit_task", task.id, cursor, smallWidth);
+            addTaskCardButton(context, "编辑", "open_edit_task", task.id, cursor, smallWidth, "");
         }
-        if (task.canEnd) {
-            addTaskCardButton("结束", "task_end", task.id, cursor, smallWidth);
+        if (task.canReward) {
+            addTaskCardButton(context, "奖励", "task_reward_open", task.id, cursor, smallWidth, "打开任务奖励箱，放入提前准备好的奖励。");
+        }
+        if (task.canEnd && activeTask) {
+            addTaskCardButton(context, "结束任务", "task_end", task.id, cursor, 62, "");
+        }
+        if (!activeTask && task.viewerJoined) {
+            addTaskCardButton(context, "删除", "task_delete_history", task.id, cursor, smallWidth, "从你的历史任务列表中删除。");
         }
         return y + cardHeight;
     }
 
-    private void addTaskCardButton(String title, String actionId, String argument, ButtonCursor cursor, int width) {
+    private int taskActionRows(ClientTask task, int contentWidth) {
+        int right = Math.max(80, contentWidth - 14);
+        int cursorX = 0;
+        int rows = 1;
+        for (int buttonWidth : taskActionButtonWidths(task)) {
+            if (cursorX > 0 && cursorX + buttonWidth > right - 8) {
+                rows++;
+                cursorX = 0;
+            }
+            cursorX += buttonWidth + 5;
+        }
+        return rows;
+    }
+
+    private List<Integer> taskActionButtonWidths(ClientTask task) {
+        List<Integer> widths = new ArrayList<>();
+        if (task.canJoin) {
+            widths.add(50);
+        }
+        if (task.canLeave) {
+            widths.add(50);
+        }
+        if (task.canVoteComplete) {
+            widths.add(70);
+        }
+        if (task.viewerJoined && !isHistoricalTask(task)) {
+            widths.add(74);
+        }
+        if (task.canEdit) {
+            widths.add(50);
+        }
+        if (task.canReward) {
+            widths.add(50);
+        }
+        if (task.canEnd && !isHistoricalTask(task)) {
+            widths.add(62);
+        }
+        if (isHistoricalTask(task) && task.viewerJoined) {
+            widths.add(50);
+        }
+        return widths;
+    }
+
+    private int renderInvitePlayerButtons(DrawContext context, ClientTask task, int x, int y, int contentWidth) {
+        String[] playerNames = serverStatus.playerNames == null ? new String[0] : serverStatus.playerNames;
+        boolean renderedAny = false;
+        ButtonCursor cursor = new ButtonCursor(x, y, x + contentWidth - 6);
+        for (String playerName : playerNames) {
+            if (safe(playerName).isBlank() || isTaskParticipant(task, playerName)) {
+                continue;
+            }
+            renderedAny = true;
+            String title = textRenderer.trimToWidth("邀请 " + playerName, 86);
+            addTaskCardButton(context, title, "task_invite_player", task.id + "|" + playerName, cursor, 92, "");
+        }
+        if (!renderedAny) {
+            drawTextLine(context, "没有可邀请的在线玩家。", x, y, contentWidth);
+            return y + 18;
+        }
+        return cursor.y + 28;
+    }
+
+    private void addTaskCardButton(DrawContext context, String title, String actionId, String argument, ButtonCursor cursor, int width, String hoverHint) {
         if (cursor.x + width > cursor.right - 8) {
             cursor.x = cursor.rowStart;
             cursor.y += 26;
+        }
+        if (!safe(hoverHint).isBlank() && activeMouseX >= cursor.x && activeMouseX < cursor.x + width && activeMouseY >= cursor.y && activeMouseY < cursor.y + 22) {
+            drawInlineStatus(context, hoverHint, cursor.rowStart, cursor.y - 13, cursor.right - cursor.rowStart, true);
         }
         addButton(title, "", actionId, argument, actionId.startsWith("task_hud") || actionId.startsWith("open_"), cursor.x, cursor.y, width, 22);
         cursor.x += width + 5;
@@ -554,13 +823,6 @@ public class FriendMenuScreen extends Screen {
             y += 36;
         } else {
             drawTextLine(context, "可见性：" + (taskDraft.publicTask ? "公开" : "私人"), x, y, contentWidth);
-            y += 22;
-        }
-
-        if (canUseAdmin) {
-            y = addInput(context, taskDraft.reward, "任务奖励（仅 OP 可改）", x, y, contentWidth);
-        } else if (!safe(taskDraft.reward.value).isBlank()) {
-            drawTextLine(context, "奖励：" + taskDraft.reward.value, x, y, contentWidth);
             y += 22;
         }
 
@@ -898,6 +1160,80 @@ public class FriendMenuScreen extends Screen {
         context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth(message, Math.max(20, width - 4))), x, y, color, false);
     }
 
+    private void renderButtonTooltip(DrawContext context, int mouseX, int mouseY, Layout layout) {
+        for (MenuButton button : buttons) {
+            if (!buttonVisible(button, layout) || !button.contains(mouseX, mouseY)) {
+                continue;
+            }
+            String hint = buttonHoverHint(button);
+            if (!hint.isBlank()) {
+                drawTooltip(context, hint, mouseX, mouseY);
+            }
+            return;
+        }
+    }
+
+    private String buttonHoverHint(MenuButton button) {
+        return switch (button.actionId()) {
+            case "open_add_location" -> "新增一个所有玩家都能看到的公共传送点。";
+            case "open_edit_location" -> "修改这个传送点的信息，普通玩家不能改 ID。";
+            case "delete_location" -> "删除这个公共传送点，只有创建者或 OP 可以删除。";
+            case "teleport_location" -> "请求服务端把你传送到这个公共地点。";
+            case "location_use_current" -> "把你当前所在位置填入传送点表单。";
+            case "location_dimension_dropdown" -> "选择传送点所在的维度。";
+            case "location_delta" -> "微调这个坐标值。";
+            case "submit_location" -> "提交后由服务端校验并保存公共传送点。";
+            case "submit_location_edit" -> "保存这个公共传送点的修改。";
+            case "open_create_task" -> "有什么目标都可以写出来，其他玩家可以一起完成。";
+            case "open_task_history" -> "查看你参与过的已完成或已结束任务。";
+            case "task_hud_toggle" -> "打开或关闭屏幕上的任务 HUD。";
+            case "task_hud_edit" -> "进入独立界面，拖动和缩放任务 HUD。";
+            case "task_hud_done" -> "保存 HUD 位置并返回任务页。";
+            case "task_hud_smaller" -> "缩小任务 HUD。";
+            case "task_hud_larger" -> "放大任务 HUD。";
+            case "task_join" -> "加入后可以参与任务完成确认，并可显示到 HUD。";
+            case "task_leave" -> "退出后这个任务不会再显示到你的 HUD。";
+            case "task_vote_complete" -> "需要当前任务 50% 玩家点击已完成后，任务才会完成。";
+            case "task_hud_select" -> "把这个任务显示到你的任务 HUD。";
+            case "open_edit_task" -> "修改任务标题、说明和可见性。";
+            case "task_reward_open" -> "打开任务奖励箱，放入提前准备好的奖励。";
+            case "task_end" -> "只有发布者可以结束任务，结束后进入历史任务。";
+            case "task_delete_history" -> "只从你的历史任务列表中删除，不影响其他玩家。";
+            case "task_toggle_invites" -> "展开在线玩家列表，邀请他们加入任务。";
+            case "task_toggle_visibility" -> "公开任务所有玩家可见，私人任务只对成员和受邀玩家可见。";
+            case "task_submit_create" -> "发布任务后，其他可见玩家可以加入。";
+            case "task_submit_edit" -> "保存任务标题、说明或可见性修改。";
+            case "activity_template" -> "切换活动类型，不同模板会显示不同输入项。";
+            case "activity_toggle_teleport" -> "控制聊天通知里是否附带前往集合点按钮。";
+            case "activity_toggle_end_date" -> "开启后活动会显示结束日期。";
+            case "activity_submit" -> "向玩家发送活动聊天通知。";
+            case "activity_claim_item" -> "领取本次发物品活动的奖励。";
+            case "activity_teleport" -> "传送到当前活动集合点。";
+            case "activity_end" -> "结束当前活动通知。";
+            default -> "";
+        };
+    }
+
+    private void drawTooltip(DrawContext context, String message, int mouseX, int mouseY) {
+        int maxTooltipWidth = Math.max(60, Math.min(240, width - 16));
+        String text = textRenderer.trimToWidth(message, maxTooltipWidth - 12);
+        int tooltipWidth = textRenderer.getWidth(text) + 12;
+        int tooltipHeight = 18;
+        int tooltipX = clamp(mouseX + 12, 4, Math.max(4, width - tooltipWidth - 4));
+        int tooltipY = mouseY + 14;
+        if (tooltipY + tooltipHeight > height - 4) {
+            tooltipY = mouseY - tooltipHeight - 10;
+        }
+        tooltipY = clamp(tooltipY, 4, Math.max(4, height - tooltipHeight - 4));
+
+        context.fill(tooltipX, tooltipY, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xEE101821);
+        context.fill(tooltipX, tooltipY, tooltipX + tooltipWidth, tooltipY + 1, 0xFF7FC2FF);
+        context.fill(tooltipX, tooltipY + tooltipHeight - 1, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xFF7FC2FF);
+        context.fill(tooltipX, tooltipY, tooltipX + 1, tooltipY + tooltipHeight, 0xFF7FC2FF);
+        context.fill(tooltipX + tooltipWidth - 1, tooltipY, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xFF7FC2FF);
+        context.drawText(textRenderer, Text.literal(text), tooltipX + 6, tooltipY + 5, 0xFFDDE7F0, false);
+    }
+
     private void runButton(MenuButton button) {
         switch (button.actionId()) {
             case "open_add_location" -> {
@@ -922,17 +1258,26 @@ public class FriendMenuScreen extends Screen {
                 taskFormMessage = "";
                 selectPage(Page.CREATE_TASK);
             }
+            case "open_task_history" -> selectPage(Page.TASK_HISTORY);
             case "open_edit_task" -> openEditTask(button.argument());
             case "back_to_tasks" -> selectPage(Page.TASKS);
+            case "task_toggle_invites" -> taskInviteListOpen = !taskInviteListOpen;
             case "task_toggle_visibility" -> taskDraft.publicTask = !taskDraft.publicTask;
             case "task_submit_create" -> submitTask(false);
             case "task_submit_edit" -> submitTask(true);
             case "task_join" -> ClientPlayNetworking.send(TaskActionPayload.simple("join", button.argument()));
-            case "task_leave" -> ClientPlayNetworking.send(TaskActionPayload.simple("leave", button.argument()));
+            case "task_leave" -> {
+                ClientTaskHud.clearSelectedTask(button.argument());
+                ClientPlayNetworking.send(TaskActionPayload.simple("leave", button.argument()));
+            }
             case "task_vote_complete" -> ClientPlayNetworking.send(TaskActionPayload.simple("vote_complete", button.argument()));
             case "task_end" -> ClientPlayNetworking.send(TaskActionPayload.simple("end", button.argument()));
+            case "task_delete_history" -> ClientPlayNetworking.send(TaskActionPayload.simple("delete_history", button.argument()));
+            case "task_invite_player" -> inviteTaskPlayer(button.argument());
+            case "task_reward_open" -> ClientPlayNetworking.send(TaskActionPayload.simple("open_rewards", button.argument()));
             case "task_hud_toggle" -> ClientTaskHud.toggleEnabled();
-            case "task_hud_edit" -> ClientTaskHud.setEditMode(!ClientTaskHud.isEditMode());
+            case "task_hud_edit" -> selectPage(Page.TASK_HUD_EDIT);
+            case "task_hud_done" -> selectPage(Page.TASKS);
             case "task_hud_smaller" -> ClientTaskHud.resizeBy(-1, width, height);
             case "task_hud_larger" -> ClientTaskHud.resizeBy(1, width, height);
             case "task_hud_select" -> ClientTaskHud.selectTask(button.argument());
@@ -946,7 +1291,7 @@ public class FriendMenuScreen extends Screen {
             case "activity_toggle_end_date" -> {
                 activityDraft.hasEndDate = !activityDraft.hasEndDate;
                 if (activityDraft.hasEndDate && activityDraft.endDateText.value.isBlank()) {
-                    activityDraft.endDateText.value = defaultEndDateText();
+                    activityDraft.endDateText.setSuggestedValue(defaultEndDateText());
                 }
             }
             case "activity_submit" -> {
@@ -1016,6 +1361,14 @@ public class FriendMenuScreen extends Screen {
         selectPage(Page.TASKS);
     }
 
+    private void inviteTaskPlayer(String argument) {
+        String[] parts = safe(argument).split("\\|", 2);
+        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            return;
+        }
+        ClientPlayNetworking.send(new TaskActionPayload("invite", parts[0], parts[1]));
+    }
+
     private String validateDraft(LocationEntry location, boolean editing) {
         if (safe(location.name).isBlank()) {
             return "传送点名称不能为空。";
@@ -1054,6 +1407,8 @@ public class FriendMenuScreen extends Screen {
         if (page.isAdminPage() && !canUseAdmin) {
             page = Page.TELEPORT;
         }
+        ClientTaskHud.setEditMode(page == Page.TASK_HUD_EDIT);
+        taskHudDragging = false;
         selectedPage = page;
         contentScroll = 0;
         setFocusedInput(null);
@@ -1062,6 +1417,9 @@ public class FriendMenuScreen extends Screen {
         }
         if (page != Page.CREATE_TASK && page != Page.EDIT_TASK) {
             taskFormMessage = "";
+        }
+        if (page != Page.TASK_DETAIL) {
+            taskInviteListOpen = false;
         }
         if (page == Page.ADD_LOCATION) {
             locationDraft.ensureDefaults();
@@ -1072,6 +1430,14 @@ public class FriendMenuScreen extends Screen {
         if (page != Page.ADMIN_PLAYER_DETAIL && page != Page.ADMIN_PLAYERS) {
             selectedAdminPlayer = "";
         }
+    }
+
+    private void rememberLastPage() {
+        Page resumePage = selectedNavPage();
+        if (resumePage.isAdminPage() && !canUseAdmin) {
+            resumePage = Page.TELEPORT;
+        }
+        lastClosedPageId = resumePage.id;
     }
 
     private boolean isPlayerOnline(String playerName) {
@@ -1102,6 +1468,14 @@ public class FriendMenuScreen extends Screen {
         }
     }
 
+    private void openTaskDetail(String id) {
+        if (findClientTask(id) != null) {
+            selectedTaskId = id;
+            taskInviteListOpen = false;
+            selectPage(Page.TASK_DETAIL);
+        }
+    }
+
     private LocationEntry findClientLocation(String id) {
         for (LocationEntry location : locations) {
             if (safe(id).equals(location.id)) {
@@ -1118,6 +1492,25 @@ public class FriendMenuScreen extends Screen {
             }
         }
         return null;
+    }
+
+    private boolean isLocationCreator(LocationEntry location) {
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        return player != null
+                && location != null
+                && player.getUuid().toString().equals(safe(location.creatorUuid));
+    }
+
+    private boolean isTaskParticipant(ClientTask task, String playerName) {
+        if (task == null || task.participants == null) {
+            return false;
+        }
+        for (String participant : task.participants) {
+            if (safe(participant).equals(playerName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Page tabAt(double mouseX, double mouseY, Layout layout) {
@@ -1147,7 +1540,8 @@ public class FriendMenuScreen extends Screen {
         if (selectedPage == Page.ADD_LOCATION || selectedPage == Page.EDIT_LOCATION) {
             return Page.TELEPORT;
         }
-        if (selectedPage == Page.CREATE_TASK || selectedPage == Page.EDIT_TASK) {
+        if (selectedPage == Page.CREATE_TASK || selectedPage == Page.EDIT_TASK || selectedPage == Page.TASK_HISTORY
+                || selectedPage == Page.TASK_DETAIL || selectedPage == Page.TASK_HUD_EDIT) {
             return Page.TASKS;
         }
         return selectedPage.isAdminPage() ? Page.ADMIN : selectedPage;
@@ -1198,6 +1592,10 @@ public class FriendMenuScreen extends Screen {
         return input.bottom() > layout.contentY() && input.top() < layout.contentBottom();
     }
 
+    private boolean taskClickAreaVisible(TaskClickArea area, Layout layout) {
+        return area.bottom() > layout.contentY() && area.top() < layout.contentBottom();
+    }
+
     private void drawScrollbar(DrawContext context, int x, int y, int width, int height, int contentHeight, int scroll) {
         int maxScroll = maxScroll(contentHeight, height);
         if (maxScroll <= 0) {
@@ -1238,20 +1636,53 @@ public class FriendMenuScreen extends Screen {
 
     private void setFocusedInput(TextInput input) {
         if (focusedInput != null) {
-            focusedInput.focused = false;
+            focusedInput.blur();
         }
         focusedInput = input;
         if (focusedInput != null) {
-            focusedInput.focused = true;
+            focusedInput.focus();
         }
     }
 
     private void onFocusedInputChanged() {
         if (focusedInput == locationDraft.name && !locationDraft.idEditedManually) {
-            locationDraft.id.value = makeId(locationDraft.name.value);
+            locationDraft.id.setSuggestedValue(makeId(locationDraft.name.value));
         } else if (focusedInput == locationDraft.id) {
             locationDraft.idEditedManually = true;
+        } else if (focusedInput == activityDraft.maintenanceTimeText) {
+            syncMaintenanceCountdownFromTime();
+        } else if (focusedInput == activityDraft.maintenanceCountdownSeconds) {
+            syncMaintenanceTimeFromCountdown();
         }
+    }
+
+    private void syncMaintenanceCountdownFromTime() {
+        if (!"maintenance".equals(activityDraft.category)) {
+            return;
+        }
+        try {
+            LocalDateTime target = LocalDateTime.parse(activityDraft.maintenanceTimeText.value.trim(), END_DATE_FORMAT);
+            long seconds = Math.max(0L, Duration.between(LocalDateTime.now(), target).getSeconds());
+            activityDraft.maintenanceCountdownSeconds.setCommittedValue(String.valueOf(Math.min(99999L, seconds)));
+        } catch (DateTimeParseException ignored) {
+            // While the user is still typing a date, keep the previous countdown.
+        }
+    }
+
+    private void syncMaintenanceTimeFromCountdown() {
+        if (!"maintenance".equals(activityDraft.category)) {
+            return;
+        }
+        String countdownText = activityDraft.maintenanceCountdownSeconds.value.trim();
+        if (countdownText.isBlank()) {
+            return;
+        }
+        double parsedSeconds = parseDouble(countdownText, Double.NaN);
+        if (!isFinite(parsedSeconds)) {
+            return;
+        }
+        int seconds = clamp((int) Math.round(parsedSeconds), 0, 99999);
+        activityDraft.maintenanceTimeText.setCommittedValue(END_DATE_FORMAT.format(LocalDateTime.now().plusSeconds(seconds)));
     }
 
     private String activeActivityCoordinates() {
@@ -1296,10 +1727,19 @@ public class FriendMenuScreen extends Screen {
 
     private static String taskStatusLabel(String status) {
         return switch (safe(status)) {
-            case "voting" -> "投票中";
+            case "voting" -> "确认中";
             case "completed" -> "已完成";
+            case "ended" -> "已结束";
             default -> "进行中";
         };
+    }
+
+    private static boolean isHistoricalTask(ClientTask task) {
+        return task != null && isHistoricalTaskStatus(task.status);
+    }
+
+    private static boolean isHistoricalTaskStatus(String status) {
+        return "completed".equals(safe(status)) || "ended".equals(safe(status));
     }
 
     private static String taskVisibilityLabel(String visibility) {
@@ -1395,8 +1835,11 @@ public class FriendMenuScreen extends Screen {
         EDIT_LOCATION("edit_location", "编辑公共传送点"),
         COORDINATES("coordinates", "坐标"),
         TASKS("tasks", "任务"),
+        TASK_HISTORY("task_history", "历史任务"),
+        TASK_DETAIL("task_detail", "任务详情"),
         CREATE_TASK("create_task", "发布任务"),
         EDIT_TASK("edit_task", "编辑任务"),
+        TASK_HUD_EDIT("task_hud_edit", "编辑HUD位置"),
         ACTIVITY("activity", "活动"),
         STATUS("status", "状态"),
         ADMIN("admin", "服主管理"),
@@ -1460,9 +1903,9 @@ public class FriendMenuScreen extends Screen {
         }
 
         void resetNew() {
-            name.value = "新传送点";
-            id.value = makeId(name.value);
-            description.value = "";
+            name.setSuggestedValue("新传送点");
+            id.setSuggestedValue(makeId(name.value));
+            description.setCommittedValue("");
             idEditedManually = false;
             dimensionDropdownOpen = false;
             editingOriginalId = "";
@@ -1474,11 +1917,11 @@ public class FriendMenuScreen extends Screen {
             if (player != null) {
                 BlockPos pos = player.getBlockPos();
                 world = clientDimensionId();
-                x.value = String.valueOf(pos.getX());
-                y.value = String.valueOf(pos.getY());
-                z.value = String.valueOf(pos.getZ());
-                yaw.value = String.format(Locale.ROOT, "%.1f", player.getYaw());
-                pitch.value = String.format(Locale.ROOT, "%.1f", player.getPitch());
+                x.setSuggestedValue(String.valueOf(pos.getX()));
+                y.setSuggestedValue(String.valueOf(pos.getY()));
+                z.setSuggestedValue(String.valueOf(pos.getZ()));
+                yaw.setSuggestedValue(String.format(Locale.ROOT, "%.1f", player.getYaw()));
+                pitch.setSuggestedValue(String.format(Locale.ROOT, "%.1f", player.getPitch()));
             }
             initialized = true;
         }
@@ -1497,7 +1940,7 @@ public class FriendMenuScreen extends Screen {
             if (target == null) {
                 return;
             }
-            target.value = format(parseDouble(target.value, 0.0D) + parseDouble(parts[1], 0.0D));
+            target.setCommittedValue(format(parseDouble(target.value, 0.0D) + parseDouble(parts[1], 0.0D)));
         }
 
         void setWorld(String worldId) {
@@ -1506,15 +1949,15 @@ public class FriendMenuScreen extends Screen {
         }
 
         void load(LocationEntry location) {
-            name.value = safe(location.name);
-            id.value = safe(location.id);
-            description.value = safe(location.description);
+            name.setCommittedValue(safe(location.name));
+            id.setCommittedValue(safe(location.id));
+            description.setCommittedValue(safe(location.description));
             world = safe(location.world).isBlank() ? "minecraft:overworld" : location.world;
-            x.value = format(location.x);
-            y.value = format(location.y);
-            z.value = format(location.z);
-            yaw.value = format(location.yaw);
-            pitch.value = format(location.pitch);
+            x.setCommittedValue(format(location.x));
+            y.setCommittedValue(format(location.y));
+            z.setCommittedValue(format(location.z));
+            yaw.setCommittedValue(format(location.yaw));
+            pitch.setCommittedValue(format(location.pitch));
             initialized = true;
             idEditedManually = true;
             dimensionDropdownOpen = false;
@@ -1552,9 +1995,9 @@ public class FriendMenuScreen extends Screen {
         void reset() {
             applyTemplate("gathering");
             hasEndDate = false;
-            endDateText.value = defaultEndDateText();
-            maintenanceTimeText.value = defaultMaintenanceTimeText();
-            maintenanceCountdownSeconds.value = "600";
+            endDateText.setSuggestedValue(defaultEndDateText());
+            maintenanceTimeText.setSuggestedValue(defaultMaintenanceTimeText());
+            maintenanceCountdownSeconds.setSuggestedValue("600");
         }
 
         void applyTemplate(String template) {
@@ -1563,40 +2006,40 @@ public class FriendMenuScreen extends Screen {
                 default -> "gathering";
             };
             hasEndDate = false;
-            endDateText.value = defaultEndDateText();
+            endDateText.setSuggestedValue(defaultEndDateText());
             switch (category) {
                 case "item_give" -> {
-                    title.value = "发物品啦";
-                    description.value = "服务器给在线玩家发放活动物品，请检查背包。";
-                    meetingPoint.value = "无需集合";
-                    itemId.value = "minecraft:diamond";
-                    itemCount.value = "1";
+                    title.setSuggestedValue("发物品啦");
+                    description.setSuggestedValue("服务器给在线玩家发放活动物品，请检查背包。");
+                    meetingPoint.setSuggestedValue("无需集合");
+                    itemId.setSuggestedValue("minecraft:diamond");
+                    itemCount.setSuggestedValue("1");
                     needsTeleport = false;
                 }
                 case "maintenance" -> {
-                    title.value = "服务器维护通知";
-                    description.value = "服务器即将进行维护，请大家尽快保存进度。";
-                    meetingPoint.value = "无需集合";
-                    maintenanceTimeText.value = defaultMaintenanceTimeText();
-                    maintenanceCountdownSeconds.value = "600";
+                    title.setSuggestedValue("服务器维护通知");
+                    description.setSuggestedValue("服务器即将进行维护，请大家尽快保存进度。");
+                    meetingPoint.setSuggestedValue("无需集合");
+                    maintenanceTimeText.setSuggestedValue(defaultMaintenanceTimeText());
+                    maintenanceCountdownSeconds.setSuggestedValue("600");
                     needsTeleport = false;
                 }
                 case "exploration" -> {
-                    title.value = "一起探索";
-                    description.value = "准备一起探索或打副本，请大家到集合点。";
-                    meetingPoint.value = "当前位置";
+                    title.setSuggestedValue("一起探索");
+                    description.setSuggestedValue("准备一起探索或打副本，请大家到集合点。");
+                    meetingPoint.setSuggestedValue("当前位置");
                     needsTeleport = true;
                 }
                 case "custom" -> {
-                    title.value = "活动通知";
-                    description.value = "请查看本次活动说明。";
-                    meetingPoint.value = "当前位置";
+                    title.setSuggestedValue("活动通知");
+                    description.setSuggestedValue("请查看本次活动说明。");
+                    meetingPoint.setSuggestedValue("当前位置");
                     needsTeleport = true;
                 }
                 default -> {
-                    title.value = "集合啦";
-                    description.value = "准备一起打活动，请大家到指定地点集合。";
-                    meetingPoint.value = "当前位置";
+                    title.setSuggestedValue("集合啦");
+                    description.setSuggestedValue("准备一起打活动，请大家到指定地点集合。");
+                    meetingPoint.setSuggestedValue("当前位置");
                     needsTeleport = true;
                 }
             }
@@ -1637,9 +2080,9 @@ public class FriendMenuScreen extends Screen {
         }
 
         void resetNew() {
-            title.value = "完成刷怪塔";
-            description.value = "一起完成这个服务器任务。";
-            reward.value = "";
+            title.setSuggestedValue("完成刷怪塔");
+            description.setSuggestedValue("一起完成这个服务器任务。");
+            reward.setCommittedValue("");
             publicTask = true;
             canChangeVisibility = true;
             editingTaskId = "";
@@ -1647,9 +2090,9 @@ public class FriendMenuScreen extends Screen {
         }
 
         void load(ClientTask task) {
-            title.value = safe(task.title);
-            description.value = safe(task.description);
-            reward.value = safe(task.reward);
+            title.setCommittedValue(safe(task.title));
+            description.setCommittedValue(safe(task.description));
+            reward.setCommittedValue(safe(task.reward));
             publicTask = !"private".equals(safe(task.visibility));
             canChangeVisibility = task.canChangeVisibility;
             editingTaskId = safe(task.id);
@@ -1661,7 +2104,7 @@ public class FriendMenuScreen extends Screen {
             submission.title = title.value;
             submission.description = description.value;
             submission.visibility = publicTask ? "public" : "private";
-            submission.reward = includeReward ? reward.value : "";
+            submission.reward = "";
             return submission;
         }
     }
@@ -1695,6 +2138,21 @@ public class FriendMenuScreen extends Screen {
         boolean canChangeVisibility;
         boolean canEnd;
         boolean canReward;
+        boolean canInvite;
+    }
+
+    private record TaskClickArea(String taskId, int x, int y, int width, int height) {
+        boolean contains(double mouseX, double mouseY) {
+            return mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
+        }
+
+        int top() {
+            return y;
+        }
+
+        int bottom() {
+            return y + height;
+        }
     }
 
     private static class ButtonCursor {
@@ -1713,16 +2171,42 @@ public class FriendMenuScreen extends Screen {
 
     private static class TextInput {
         String value;
+        String hint;
         final int maxLength;
         int x;
         int y;
         int width;
         int height;
         boolean focused;
+        boolean clearOnFocus;
 
         TextInput(String value, int maxLength) {
-            this.value = value;
             this.maxLength = maxLength;
+            setSuggestedValue(value);
+        }
+
+        void setSuggestedValue(String value) {
+            this.value = trimToMax(value);
+            this.hint = this.value;
+            this.clearOnFocus = !this.value.isBlank();
+        }
+
+        void setCommittedValue(String value) {
+            this.value = trimToMax(value);
+            this.hint = this.value;
+            this.clearOnFocus = false;
+        }
+
+        void focus() {
+            focused = true;
+            if (clearOnFocus) {
+                value = "";
+                clearOnFocus = false;
+            }
+        }
+
+        void blur() {
+            focused = false;
         }
 
         void setBounds(int x, int y, int width, int height) {
@@ -1739,8 +2223,16 @@ public class FriendMenuScreen extends Screen {
             context.fill(x, y + height - 1, x + width, y + height, border);
             context.fill(x, y, x + 1, y + height, border);
             context.fill(x + width - 1, y, x + width, y + height, border);
-            String visible = textRenderer.trimToWidth(value, Math.max(10, width - 12));
-            context.drawText(textRenderer, Text.literal(visible + (focused ? "_" : "")), x + 5, y + 7, 0xFFFFFFFF, false);
+            String display = value;
+            int color = 0xFFFFFFFF;
+            if (display.isEmpty() && !focused && hint != null && !hint.isBlank()) {
+                display = hint;
+                color = 0xFF8D9AA6;
+            } else if (clearOnFocus) {
+                color = 0xFF9FB0BF;
+            }
+            String visible = textRenderer.trimToWidth(display, Math.max(10, width - 12));
+            context.drawText(textRenderer, Text.literal(visible + (focused ? "_" : "")), x + 5, y + 7, color, false);
         }
 
         boolean charTyped(CharInput input) {
@@ -1751,6 +2243,7 @@ public class FriendMenuScreen extends Screen {
             if (text == null || text.isEmpty()) {
                 return false;
             }
+            beginUserInput();
             if (value.length() + text.length() > maxLength) {
                 value += text.substring(0, Math.max(0, maxLength - value.length()));
             } else {
@@ -1761,12 +2254,14 @@ public class FriendMenuScreen extends Screen {
 
         boolean keyPressed(KeyInput input) {
             if (input.key() == GLFW.GLFW_KEY_BACKSPACE) {
+                beginUserInput();
                 if (!value.isEmpty()) {
                     value = value.substring(0, value.length() - 1);
                 }
                 return true;
             }
             if (input.key() == GLFW.GLFW_KEY_DELETE) {
+                beginUserInput();
                 value = "";
                 return true;
             }
@@ -1774,6 +2269,18 @@ public class FriendMenuScreen extends Screen {
                 return true;
             }
             return false;
+        }
+
+        private void beginUserInput() {
+            if (clearOnFocus) {
+                value = "";
+                clearOnFocus = false;
+            }
+        }
+
+        private String trimToMax(String text) {
+            String safeText = text == null ? "" : text;
+            return safeText.length() <= maxLength ? safeText : safeText.substring(0, maxLength);
         }
 
         boolean contains(double mouseX, double mouseY) {

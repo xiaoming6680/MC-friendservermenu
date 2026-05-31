@@ -10,6 +10,8 @@ public class LocationEntry {
     public float yaw;
     public float pitch;
     public String description;
+    public String creatorUuid;
+    public String creatorName;
 
     public LocationEntry() {
     }

@@ -48,9 +48,14 @@ public class MenuButton {
         context.fill(x, y, x + 1, y + height, border);
         context.fill(x + width - 1, y, x + width, y + height, border);
 
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, title, width - 16)), x + 8, y + 7, TITLE_COLOR, true);
         if (description != null && !description.isBlank()) {
+            context.drawText(textRenderer, Text.literal(trim(textRenderer, title, width - 16)), x + 8, y + 7, TITLE_COLOR, true);
             context.drawText(textRenderer, Text.literal(trim(textRenderer, description, width - 16)), x + 8, y + 24, DESCRIPTION_COLOR, false);
+        } else {
+            String visibleTitle = trim(textRenderer, title, width - 8);
+            int titleX = x + Math.max(4, (width - textRenderer.getWidth(visibleTitle)) / 2);
+            int titleY = y + Math.max(4, (height - textRenderer.fontHeight) / 2);
+            context.drawText(textRenderer, Text.literal(visibleTitle), titleX, titleY, TITLE_COLOR, true);
         }
     }
 
