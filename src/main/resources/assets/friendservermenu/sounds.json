@@ -1,0 +1,13 @@
+{
+  "gui_click": {
+    "subtitle": "小铭的服务器菜单按钮",
+    "sounds": [
+      {
+        "name": "friendservermenu:button",
+        "type": "file",
+        "volume": 1.0,
+        "pitch": 1.0
+      }
+    ]
+  }
+}

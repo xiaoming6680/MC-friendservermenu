@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "friendservermenu",
+  "version": "${version}",
+  "name": "FriendServerMenu",
+  "description": "A lightweight friend server control menu with teleport, coordinates, activities, status, and simple owner tools.",
+  "authors": [
+    "XM6680"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.xm6680.friendservermenu.FriendServerMenuMod"
+    ],
+    "client": [
+      "com.xm6680.friendservermenu.FriendServerMenuClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.2",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
