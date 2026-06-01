@@ -34,6 +34,7 @@ public final class StatusManager {
         status.weather = weatherName(world);
         status.mspt = server.getAverageTickTime();
         status.tps = Math.min(20.0D, 1000.0D / Math.max(1.0D, status.mspt));
+        status.deathPoint = DeathPointManager.getDeathPoint(player);
         return FriendServerMenuMod.GSON.toJson(status);
     }
 
@@ -90,5 +91,6 @@ public final class StatusManager {
         public String weather;
         public double mspt;
         public double tps;
+        public DeathPointManager.ViewDeathPoint deathPoint;
     }
 }

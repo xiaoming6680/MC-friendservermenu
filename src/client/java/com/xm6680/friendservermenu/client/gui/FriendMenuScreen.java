@@ -41,8 +41,10 @@ import java.util.Locale;
 public class FriendMenuScreen extends Screen {
     private static final String DEFAULT_TITLE = "小铭的服务器菜单";
     private static final int REFRESH_INTERVAL_TICKS = 20;
+    private static final int RECENT_COORDINATE_LIMIT = 5;
     private static final DateTimeFormatter END_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static String lastClosedPageId = Page.TELEPORT.id;
+    private static final List<String> recentCopiedCoordinates = new ArrayList<>();
 
     private final List<MenuButton> buttons = new ArrayList<>();
     private final List<TaskClickArea> taskClickAreas = new ArrayList<>();
@@ -544,15 +546,15 @@ public class FriendMenuScreen extends Screen {
     }
 
     private int renderCoordinatePage(DrawContext context, int x, int y, int contentWidth) {
-        context.drawText(textRenderer, Text.literal("当前位置"), x, y, 0xFFFFFFFF, true);
-        context.drawText(textRenderer, Text.literal(clientCoordinates()), x, y + 18, 0xFFDDE7F0, false);
-        context.drawText(textRenderer, Text.literal("当前群系：" + clientBiomeName()), x, y + 34, 0xFFC9D4DE, false);
-        y += 62;
+        if (serverStatus.deathPoint != null) {
+            y = renderDeathPointSection(context, x, y, contentWidth);
+            y += 10;
+        }
 
-        int hudButtonWidth = Math.max(84, Math.min(112, (contentWidth - 8) / 2));
-        addButton(ClientCoordinateHud.isEnabled() ? "坐标HUD显示中" : "坐标HUD已隐藏", "", "coordinate_hud_toggle", "", true, x, y, hudButtonWidth, 24);
-        addButton("编辑坐标HUD位置", "", "coordinate_hud_edit", "", true, x + hudButtonWidth + 6, y, hudButtonWidth, 24);
-        y += 34;
+        context.drawText(textRenderer, Text.literal("当前位置"), x, y, 0xFFFFFFFF, true);
+        drawTextLine(context, clientCoordinates(), x, y + 18, contentWidth);
+        context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth("当前群系：" + clientBiomeName(), Math.max(20, contentWidth - 8))), x, y + 34, 0xFFC9D4DE, false);
+        y += 56;
 
         int buttonWidth = Math.max(68, Math.min(84, (contentWidth - 12) / 3));
         int buttonHeight = 26;
@@ -571,7 +573,59 @@ public class FriendMenuScreen extends Screen {
             addButton(action[0], "", action[1], "", "copy_coords".equals(action[1]), currentX, currentY, buttonWidth, buttonHeight);
             currentX += buttonWidth + 6;
         }
-        return currentY + buttonHeight + 8;
+        y = currentY + buttonHeight + 18;
+
+        context.drawText(textRenderer, Text.literal("坐标 HUD"), x, y, 0xFFFFFFFF, true);
+        y += 18;
+        int hudButtonWidth = Math.max(84, Math.min(112, (contentWidth - 8) / 2));
+        addButton(ClientCoordinateHud.isEnabled() ? "HUD显示中" : "HUD已隐藏", "", "coordinate_hud_toggle", "", true, x, y, hudButtonWidth, 24);
+        addButton("编辑HUD位置", "", "coordinate_hud_edit", "", true, x + hudButtonWidth + 6, y, hudButtonWidth, 24);
+        y += 38;
+
+        if (!recentCopiedCoordinates.isEmpty()) {
+            context.drawText(textRenderer, Text.literal("最近复制的坐标"), x, y, 0xFFFFFFFF, true);
+            y += 18;
+            for (String coordinate : recentCopiedCoordinates) {
+                int deleteWidth = 44;
+                int copyWidth = Math.max(92, contentWidth - deleteWidth - 12);
+                addButton("复制", coordinate, "copy_recent_coordinate", coordinate, true, x, y, copyWidth, 36);
+                addButton("删除", "", "delete_recent_coordinate", coordinate, true, x + copyWidth + 6, y, deleteWidth, 36);
+                y += 40;
+            }
+        }
+        return y + 4;
+    }
+
+    private int renderDeathPointSection(DrawContext context, int x, int y, int contentWidth) {
+        String coordinates = deathPointCoordinates();
+        boolean wide = contentWidth >= 230;
+        int sectionHeight = wide ? 72 : 100;
+        int cardX = x - 4;
+        int cardY = y - 4;
+        int cardRight = x + contentWidth - 2;
+        int cardBottom = y + sectionHeight;
+        int innerX = cardX + 18;
+        int innerY = cardY + 12;
+        int innerRight = cardRight - 12;
+        context.fill(cardX, cardY, cardRight, cardBottom, 0x88313A42);
+        context.fill(cardX, cardY, cardRight, cardY + 1, 0xFF64717D);
+        context.fill(cardX, cardBottom - 1, cardRight, cardBottom, 0xFF64717D);
+        context.fill(cardX, cardY, cardX + 1, cardBottom, 0xFF64717D);
+        context.fill(cardRight - 1, cardY, cardRight, cardBottom, 0xFF64717D);
+        context.fill(cardX, cardY, cardX + 3, cardBottom, 0xFFD86A7B);
+        context.drawText(textRenderer, Text.literal("最近死亡点"), innerX, innerY, 0xFFFFD7DD, true);
+
+        if (wide) {
+            int buttonWidth = 82;
+            drawTextLine(context, coordinates, innerX, innerY + 19, innerRight - innerX - buttonWidth - 14);
+            context.drawText(textRenderer, Text.literal("5分钟内有效"), innerX, innerY + 38, 0xFFE7A7B0, false);
+            addButton("传送", "", "teleport_death_point", "", false, innerRight - buttonWidth, innerY + 18, buttonWidth, 28);
+        } else {
+            drawTextLine(context, coordinates, innerX, innerY + 19, innerRight - innerX);
+            context.drawText(textRenderer, Text.literal("5分钟内有效"), innerX, innerY + 38, 0xFFE7A7B0, false);
+            addButton("传送到死亡点", "", "teleport_death_point", "", false, innerX, innerY + 58, Math.min(116, innerRight - innerX), 28);
+        }
+        return y + sectionHeight;
     }
 
     private int renderSetupPage(DrawContext context, int x, int y, int contentWidth) {
@@ -1297,6 +1351,9 @@ public class FriendMenuScreen extends Screen {
         return switch (button.actionId()) {
             case "setup_finish" -> "保存菜单名称，以后打开 GUI 时显示在左上角。";
             case "copy_coords" -> "复制当前坐标和维度到系统剪贴板。";
+            case "teleport_death_point" -> "传送到最近一次死亡点，传送后这条记录会消失。";
+            case "copy_recent_coordinate" -> "复制这条坐标记录，不能传送。";
+            case "delete_recent_coordinate" -> "从最近复制列表中删除这条记录。";
             case "send_coords_public" -> "把当前坐标发到聊天栏，并附带绿色传送按钮。";
             case "send_coords_private" -> "只把当前坐标发给自己，方便保存或查看。";
             case "coordinate_hud_toggle" -> "打开或关闭屏幕上的坐标 HUD。";
@@ -1457,13 +1514,17 @@ public class FriendMenuScreen extends Screen {
             case "activity_end" -> ClientPlayNetworking.send(new MenuActionPayload(button.actionId(), button.argument()));
             case "activity_claim_item" -> ClientPlayNetworking.send(new MenuActionPayload(button.actionId(), button.argument()));
             case "copy_coords" -> {
-                MinecraftClient.getInstance().keyboard.setClipboard(clientCoordinates());
-                ClientPlayerEntity player = MinecraftClient.getInstance().player;
-                if (player != null) {
-                    player.sendMessage(Text.literal("坐标已复制"), true);
-                }
+                copyCoordinateText(clientCoordinates());
                 close();
             }
+            case "copy_death_point" -> copyCoordinateText(deathPointCoordinates());
+            case "copy_recent_coordinate" -> copyCoordinateText(button.argument());
+            case "delete_recent_coordinate" -> recentCopiedCoordinates.remove(button.argument());
+            case "teleport_death_point" -> {
+                ClientPlayNetworking.send(new MenuActionPayload(button.actionId(), button.argument()));
+                close();
+            }
+            case "delete_death_point" -> ClientPlayNetworking.send(new MenuActionPayload(button.actionId(), button.argument()));
             case "send_coords_public", "send_coords_private" -> {
                 ClientPlayNetworking.send(new MenuActionPayload(button.actionId(), button.argument()));
                 close();
@@ -1529,6 +1590,31 @@ public class FriendMenuScreen extends Screen {
             return;
         }
         ClientPlayNetworking.send(new TaskActionPayload("invite", parts[0], parts[1]));
+    }
+
+    private void copyCoordinateText(String coordinates) {
+        String text = safe(coordinates);
+        if (text.isBlank()) {
+            return;
+        }
+        MinecraftClient.getInstance().keyboard.setClipboard(text);
+        rememberCopiedCoordinate(text);
+        ClientPlayerEntity player = MinecraftClient.getInstance().player;
+        if (player != null) {
+            player.sendMessage(Text.literal("坐标已复制"), true);
+        }
+    }
+
+    private static void rememberCopiedCoordinate(String coordinates) {
+        String text = safe(coordinates).trim();
+        if (text.isBlank()) {
+            return;
+        }
+        recentCopiedCoordinates.removeIf(existing -> existing.equals(text));
+        recentCopiedCoordinates.add(0, text);
+        while (recentCopiedCoordinates.size() > RECENT_COORDINATE_LIMIT) {
+            recentCopiedCoordinates.remove(recentCopiedCoordinates.size() - 1);
+        }
     }
 
     private String validateDraft(LocationEntry location, boolean editing) {
@@ -1796,6 +1882,14 @@ public class FriendMenuScreen extends Screen {
 
         BlockPos pos = player.getBlockPos();
         return "[" + clientDimensionName() + " / " + clientBiomeName(pos) + "] X: " + pos.getX() + ", Y: " + pos.getY() + ", Z: " + pos.getZ();
+    }
+
+    private String deathPointCoordinates() {
+        ClientDeathPoint point = serverStatus.deathPoint;
+        if (point == null) {
+            return "";
+        }
+        return "[" + dimensionName(point.world) + "] X: " + point.x + ", Y: " + point.y + ", Z: " + point.z;
     }
 
     private String clientBiomeName(BlockPos pos) {
@@ -2571,10 +2665,19 @@ public class FriendMenuScreen extends Screen {
         String weather;
         double mspt;
         double tps;
+        ClientDeathPoint deathPoint;
 
         static ClientStatus empty() {
             return new ClientStatus();
         }
+    }
+
+    private static class ClientDeathPoint {
+        String world;
+        int x;
+        int y;
+        int z;
+        long createdAtMillis;
     }
 
     private static class ActivitySubmission {

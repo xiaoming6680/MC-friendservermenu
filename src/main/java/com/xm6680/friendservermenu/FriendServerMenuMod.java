@@ -5,17 +5,21 @@ import com.google.gson.GsonBuilder;
 import com.xm6680.friendservermenu.command.ActivityClaimCommand;
 import com.xm6680.friendservermenu.command.AdminMenuCommand;
 import com.xm6680.friendservermenu.command.CoordinateTeleportCommand;
+import com.xm6680.friendservermenu.command.DeathPointTeleportCommand;
 import com.xm6680.friendservermenu.command.MenuCommand;
 import com.xm6680.friendservermenu.command.TaskJoinCommand;
 import com.xm6680.friendservermenu.config.ModConfigManager;
 import com.xm6680.friendservermenu.network.ModNetworking;
 import com.xm6680.friendservermenu.server.AdminActionManager;
 import com.xm6680.friendservermenu.server.ActivityManager;
+import com.xm6680.friendservermenu.server.DeathPointManager;
 import com.xm6680.friendservermenu.server.TaskManager;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
 import net.minecraft.sound.SoundEvent;
@@ -33,6 +37,12 @@ public class FriendServerMenuMod implements ModInitializer {
         ModConfigManager.load();
         ModNetworking.registerCommon();
         ServerLifecycleEvents.SERVER_STARTED.register(TaskManager::load);
+        ServerLifecycleEvents.SERVER_STARTED.register(DeathPointManager::load);
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
+            if (entity instanceof ServerPlayerEntity player) {
+                DeathPointManager.recordDeath(player);
+            }
+        });
         ServerTickEvents.END_SERVER_TICK.register(AdminActionManager::tickFlightGrants);
         ServerTickEvents.END_SERVER_TICK.register(ActivityManager::tickActivities);
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
@@ -47,6 +57,7 @@ public class FriendServerMenuMod implements ModInitializer {
         AdminMenuCommand.register();
         ActivityClaimCommand.register();
         CoordinateTeleportCommand.register();
+        DeathPointTeleportCommand.register();
         TaskJoinCommand.register();
     }
 

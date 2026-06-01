@@ -33,6 +33,8 @@ public final class ServerActionHandler {
             case "teleport_location" -> TeleportManager.teleportToLocation(player, argument);
             case "send_coords_public" -> StatusManager.broadcastCoordinates(player);
             case "send_coords_private" -> StatusManager.sendCoordinatesToSelf(player);
+            case "teleport_death_point" -> DeathPointManager.teleportToDeathPoint(player);
+            case "delete_death_point" -> DeathPointManager.deleteDeathPoint(player);
             case "activity_request" -> player.sendMessage(Text.literal("活动组织功能已改为 OP 模板。"), false);
             case "activity_end" -> ActivityManager.endActivity(player, argument);
             case "activity_claim_item" -> ActivityManager.claimItem(player, argument);

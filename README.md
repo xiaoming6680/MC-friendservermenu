@@ -18,7 +18,7 @@ MOD ID：`friendservermenu`
 - 自定义菜单：玩家输入 `/menu` 打开 GUI，并默认回到上次退出时所在的主界面。
 - 首次初始化：服务器第一次使用时，OP 打开菜单会进入初始化界面，设置左上角显示的 GUI 名称。
 - 公共传送点：玩家可新增、编辑公共传送点；创建者和 OP 可删除传送点。
-- 坐标分享：支持复制坐标、公开坐标、私发坐标；公开坐标聊天消息附带 `[点我传送]`。
+- 坐标分享：支持复制坐标、公开坐标、私发坐标、死亡点记录和最近复制坐标列表；公开坐标聊天消息附带 `[点我传送]`。
 - 坐标 HUD：可在屏幕上显示当前维度、中文群系和坐标，支持开关、拖动、自由调整宽高比例。
 - 玩家任务：玩家可发布公开或私人任务，其他玩家可加入、退出、邀请、编辑和确认完成。
 - 任务 HUD：已加入任务可显示到 HUD，支持独立开关、拖动、自由调整宽高比例。
@@ -36,14 +36,14 @@ MOD ID：`friendservermenu`
 
 1. 安装 Minecraft `1.21.11` 对应的 Fabric 服务端。
 2. 将 Fabric API 放入服务端 `mods` 文件夹。
-3. 将 `friendservermenu-1.0.0.jar` 放入服务端 `mods` 文件夹。
+3. 将 `friendservermenu-1.1.0.jar` 放入服务端 `mods` 文件夹。
 4. 启动服务端。
 
 客户端：
 
 1. 安装 Minecraft `1.21.11` 对应的 Fabric 客户端。
 2. 将 Fabric API 放入客户端 `mods` 文件夹。
-3. 将同一个 `friendservermenu-1.0.0.jar` 放入客户端 `mods` 文件夹。
+3. 将同一个 `friendservermenu-1.1.0.jar` 放入客户端 `mods` 文件夹。
 
 ## 首次使用
 
@@ -74,6 +74,7 @@ MOD ID：`friendservermenu`
 | `/menu activity` | 直接打开活动分页 |
 | `/adminmenu` | 直接打开服主管理分页，仅 OP 等级 2 及以上可用 |
 | `/fsm_coord_tp <id>` | 点击公开坐标聊天按钮时使用的临时传送命令 |
+| `/fsm_death_tp` | 点击死亡点聊天按钮时使用的临时传送命令 |
 | `/fsm_task_join <id>` | 点击任务邀请 `[加入任务]` 时使用的加入命令 |
 | `/fsm_activity_claim <id>` | 点击活动 `[手动领取]` 时使用的领取命令 |
 
@@ -99,6 +100,7 @@ config/friendservermenu.json
 
 ```text
 config/friendservermenu-tasks.json
+config/friendservermenu-death-points.json
 ```
 
 客户端本地 HUD 设置：
@@ -128,7 +130,10 @@ config/friendservermenu-coordinate-hud.json
 
 坐标页支持：
 
+- 在玩家死亡后置顶显示最近死亡点，5 分钟内可传送。
+- 死亡点传送后或超过 5 分钟后会从坐标页消失。
 - 复制当前坐标。
+- 显示最近复制过的 5 条坐标，条目可再次复制，也可单独删除，不会传送。
 - 向聊天栏公开坐标，并附带 `[点我传送]`。
 - 只把坐标私发给自己。
 - 显示当前中文群系。
@@ -141,6 +146,12 @@ config/friendservermenu-coordinate-hud.json
 
 ```text
 /fsm_coord_tp <id>
+```
+
+死亡时聊天栏也会显示刚刚的死亡点，并附带 `[点我传送]`：
+
+```text
+/fsm_death_tp
 ```
 
 ## 玩家任务
@@ -238,8 +249,8 @@ Windows PowerShell：
 构建完成后，产物位于：
 
 ```text
-build/libs/friendservermenu-1.0.0.jar
-build/libs/friendservermenu-1.0.0-sources.jar
+build/libs/friendservermenu-1.1.0.jar
+build/libs/friendservermenu-1.1.0-sources.jar
 ```
 
 ## 项目结构
