@@ -22,6 +22,7 @@ public final class ModNetworking {
         PayloadTypeRegistry.playS2C().register(LocationMutationResultPayload.ID, LocationMutationResultPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(MenuActionPayload.ID, MenuActionPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestMenuDataPayload.ID, RequestMenuDataPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RequestOpenMenuPayload.ID, RequestOpenMenuPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(AddLocationPayload.ID, AddLocationPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(EditLocationPayload.ID, EditLocationPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(DeleteLocationPayload.ID, DeleteLocationPayload.CODEC);
@@ -33,6 +34,8 @@ public final class ModNetworking {
                 context.server().execute(() -> ServerActionHandler.handle(context.player(), payload)));
         ServerPlayNetworking.registerGlobalReceiver(RequestMenuDataPayload.ID, (payload, context) ->
                 context.server().execute(() -> sendLiveData(context.player())));
+        ServerPlayNetworking.registerGlobalReceiver(RequestOpenMenuPayload.ID, (payload, context) ->
+                context.server().execute(() -> sendMenu(context.player(), "")));
         ServerPlayNetworking.registerGlobalReceiver(AddLocationPayload.ID, (payload, context) ->
                 context.server().execute(() -> ServerActionHandler.handleAddLocation(context.player(), payload)));
         ServerPlayNetworking.registerGlobalReceiver(EditLocationPayload.ID, (payload, context) ->

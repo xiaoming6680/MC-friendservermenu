@@ -2,6 +2,7 @@ package com.xm6680.friendservermenu;
 
 import com.xm6680.friendservermenu.client.ClientNetworking;
 import com.xm6680.friendservermenu.client.ClientCoordinateHud;
+import com.xm6680.friendservermenu.client.ClientKeyBindings;
 import com.xm6680.friendservermenu.client.ClientTaskHud;
 import net.fabricmc.api.ClientModInitializer;
 
@@ -10,6 +11,7 @@ public class FriendServerMenuClient implements ClientModInitializer {
     public void onInitializeClient() {
         FriendServerMenuMod.registerSoundEvents();
         ClientNetworking.register();
+        ClientKeyBindings.register();
         ClientCoordinateHud.register();
         ClientTaskHud.register();
     }
