@@ -36,14 +36,14 @@ MOD ID：`friendservermenu`
 
 1. 安装 Minecraft `1.21.11` 对应的 Fabric 服务端。
 2. 将 Fabric API 放入服务端 `mods` 文件夹。
-3. 将 `friendservermenu-1.1.0.jar` 放入服务端 `mods` 文件夹。
+3. 将 `friendservermenu-1.2.0.jar` 放入服务端 `mods` 文件夹。
 4. 启动服务端。
 
 客户端：
 
 1. 安装 Minecraft `1.21.11` 对应的 Fabric 客户端。
 2. 将 Fabric API 放入客户端 `mods` 文件夹。
-3. 将同一个 `friendservermenu-1.1.0.jar` 放入客户端 `mods` 文件夹。
+3. 将同一个 `friendservermenu-1.2.0.jar` 放入客户端 `mods` 文件夹。
 
 ## 首次使用
 
@@ -254,8 +254,8 @@ Windows PowerShell：
 构建完成后，产物位于：
 
 ```text
-build/libs/friendservermenu-1.1.0.jar
-build/libs/friendservermenu-1.1.0-sources.jar
+build/libs/friendservermenu-1.2.0.jar
+build/libs/friendservermenu-1.2.0-sources.jar
 ```
 
 ## 项目结构
