@@ -1,4 +1,13 @@
 {
   "key.category.friendservermenu.menu": "Friend Server Menu",
-  "key.friendservermenu.open_menu": "Open Server Menu"
+  "key.friendservermenu.open_menu": "Open Server Menu",
+  "gui.friendservermenu.page.settings": "Settings",
+  "gui.friendservermenu.settings.personal_settings": "Personal Settings",
+  "gui.friendservermenu.settings.hud_toggles": "HUD Toggles",
+  "gui.friendservermenu.admin.server_feature_toggles": "Server Feature Toggles",
+  "gui.friendservermenu.settings.death_point_enabled": "Death Point",
+  "gui.friendservermenu.settings.death_point_chat_enabled": "Death Point Chat Prompt",
+  "gui.friendservermenu.settings.auto_claim_activity_items": "Auto-claim Activity Items",
+  "gui.friendservermenu.settings.coordinate_hud": "Coordinate HUD",
+  "gui.friendservermenu.settings.task_hud": "Task HUD"
 }

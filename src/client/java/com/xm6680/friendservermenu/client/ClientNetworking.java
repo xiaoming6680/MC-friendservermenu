@@ -4,6 +4,8 @@ import com.xm6680.friendservermenu.client.gui.FriendMenuScreen;
 import com.xm6680.friendservermenu.network.LocationMutationResultPayload;
 import com.xm6680.friendservermenu.network.MenuDataPayload;
 import com.xm6680.friendservermenu.network.OpenMenuPayload;
+import com.xm6680.friendservermenu.network.PlayerSettingsPayload;
+import com.xm6680.friendservermenu.network.ServerFeatureSettingsPayload;
 import com.xm6680.friendservermenu.network.ServerStatusPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
@@ -38,6 +40,20 @@ public final class ClientNetworking {
                 context.client().execute(() -> {
                     if (MinecraftClient.getInstance().currentScreen instanceof FriendMenuScreen screen) {
                         screen.applyLocationMutationResult(payload);
+                    }
+                }));
+
+        ClientPlayNetworking.registerGlobalReceiver(PlayerSettingsPayload.ID, (payload, context) ->
+                context.client().execute(() -> {
+                    if (MinecraftClient.getInstance().currentScreen instanceof FriendMenuScreen screen) {
+                        screen.applyPlayerSettings(payload);
+                    }
+                }));
+
+        ClientPlayNetworking.registerGlobalReceiver(ServerFeatureSettingsPayload.ID, (payload, context) ->
+                context.client().execute(() -> {
+                    if (MinecraftClient.getInstance().currentScreen instanceof FriendMenuScreen screen) {
+                        screen.applyServerFeatureSettings(payload);
                     }
                 }));
     }

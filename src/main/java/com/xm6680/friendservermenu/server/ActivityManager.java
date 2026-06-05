@@ -84,6 +84,11 @@ public final class ActivityManager {
 
         MinecraftServer server = player.getCommandSource().getServer();
         broadcastActivity(server, activity);
+        if ("item_give".equals(activity.category)) {
+            for (ServerPlayerEntity target : server.getPlayerManager().getPlayerList()) {
+                tryAutoClaimForPlayer(target);
+            }
+        }
         ModNetworking.broadcastMenuData(server);
     }
 
@@ -184,6 +189,17 @@ public final class ActivityManager {
         activity.itemClaimedPlayers.add(player.getUuid());
         player.sendMessage(Text.literal("已领取活动物品：" + activity.itemId + " x" + activity.itemCount), false);
         ModNetworking.sendLiveData(player);
+    }
+
+    public static void tryAutoClaimForPlayer(ServerPlayerEntity player) {
+        ActiveActivity activity = currentActivity();
+        if (player == null || activity == null || !"item_give".equals(activity.category)) {
+            return;
+        }
+        if (!PlayerSettingsManager.autoClaimActivityItems(player)) {
+            return;
+        }
+        claimItem(player, activity.id);
     }
 
     public static void notifyActiveActivityOnJoin(ServerPlayerEntity player) {

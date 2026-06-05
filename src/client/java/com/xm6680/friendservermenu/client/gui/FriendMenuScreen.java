@@ -12,9 +12,13 @@ import com.xm6680.friendservermenu.network.EditLocationPayload;
 import com.xm6680.friendservermenu.network.LocationMutationResultPayload;
 import com.xm6680.friendservermenu.network.MenuActionPayload;
 import com.xm6680.friendservermenu.network.MenuDataPayload;
+import com.xm6680.friendservermenu.network.PlayerSettingsPayload;
 import com.xm6680.friendservermenu.network.RequestMenuDataPayload;
+import com.xm6680.friendservermenu.network.ServerFeatureSettingsPayload;
 import com.xm6680.friendservermenu.network.ServerStatusPayload;
 import com.xm6680.friendservermenu.network.TaskActionPayload;
+import com.xm6680.friendservermenu.network.UpdatePlayerSettingsPayload;
+import com.xm6680.friendservermenu.network.UpdateServerFeatureSettingsPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.Click;
@@ -25,6 +29,7 @@ import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
@@ -40,6 +45,9 @@ import java.util.Locale;
 
 public class FriendMenuScreen extends Screen {
     private static final String DEFAULT_TITLE = "小铭的服务器菜单";
+    private static final String SETTING_AUTO_CLAIM_ACTIVITY_ITEMS = "auto_claim_activity_items";
+    private static final String FEATURE_DEATH_POINT_ENABLED = "death_point_enabled";
+    private static final String FEATURE_DEATH_POINT_CHAT_ENABLED = "death_point_chat_enabled";
     private static final int REFRESH_INTERVAL_TICKS = 20;
     private static final int RECENT_COORDINATE_LIMIT = 5;
     private static final DateTimeFormatter END_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
@@ -59,6 +67,8 @@ public class FriendMenuScreen extends Screen {
     private Page selectedPage;
     private List<LocationEntry> locations = List.of();
     private ClientStatus serverStatus = ClientStatus.empty();
+    private ClientPlayerSettings playerSettings = new ClientPlayerSettings();
+    private ClientServerFeatureSettings serverFeatureSettings = new ClientServerFeatureSettings();
     private ActiveActivity activeActivity;
     private List<ClientTask> tasks = List.of();
     private long activeActivityReceivedAtMillis;
@@ -149,6 +159,22 @@ public class FriendMenuScreen extends Screen {
         }
     }
 
+    public void applyPlayerSettings(PlayerSettingsPayload payload) {
+        ClientPlayerSettings settings = new ClientPlayerSettings();
+        settings.autoClaimActivityItems = payload.autoClaimActivityItems();
+        this.playerSettings = settings;
+    }
+
+    public void applyServerFeatureSettings(ServerFeatureSettingsPayload payload) {
+        ClientServerFeatureSettings settings = new ClientServerFeatureSettings();
+        settings.deathPointEnabled = payload.deathPointEnabled();
+        settings.deathPointChatEnabled = payload.deathPointChatEnabled();
+        this.serverFeatureSettings = settings;
+        if (!settings.deathPointEnabled) {
+            this.serverStatus.deathPoint = null;
+        }
+    }
+
     @Override
     public void tick() {
         refreshTicks++;
@@ -211,6 +237,7 @@ public class FriendMenuScreen extends Screen {
             case TASK_HUD_EDIT -> renderTaskHudEditPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case ACTIVITY -> renderActivityPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case STATUS -> renderStatusPage(context, layout.contentX(), layout.contentY() - contentScroll);
+            case SETTINGS -> renderSettingsPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case ADMIN -> renderAdminPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case ADMIN_TIME -> renderAdminTimePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
             case ADMIN_WEATHER -> renderAdminWeatherPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
@@ -237,7 +264,7 @@ public class FriendMenuScreen extends Screen {
         if (selectedPage == Page.TASK_HUD_EDIT) {
             if (click.button() == 0) {
                 for (MenuButton menuButton : buttons) {
-                    if (menuButton.contains(mouseX, mouseY)) {
+                    if (menuButton.enabled() && menuButton.contains(mouseX, mouseY)) {
                         playClickSound();
                         runButton(menuButton);
                         return true;
@@ -306,7 +333,7 @@ public class FriendMenuScreen extends Screen {
                 setFocusedInput(null);
 
                 for (MenuButton menuButton : buttons) {
-                    if (buttonVisible(menuButton, layout) && menuButton.contains(mouseX, mouseY)) {
+                    if (menuButton.enabled() && buttonVisible(menuButton, layout) && menuButton.contains(mouseX, mouseY)) {
                         playClickSound();
                         runButton(menuButton);
                         return true;
@@ -551,45 +578,53 @@ public class FriendMenuScreen extends Screen {
             y += 10;
         }
 
-        context.drawText(textRenderer, Text.literal("当前位置"), x, y, 0xFFFFFFFF, true);
-        drawTextLine(context, clientCoordinates(), x, y + 18, contentWidth);
-        context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth("当前群系：" + clientBiomeName(), Math.max(20, contentWidth - 8))), x, y + 34, 0xFFC9D4DE, false);
-        y += 56;
+        int currentCardHeight = contentWidth >= 260 ? 100 : 132;
+        drawCard(context, x - 4, y - 4, contentWidth - 2, currentCardHeight);
+        drawSectionTitle(context, "当前位置", x + 8, y + 8);
+        drawTextLine(context, clientCoordinates(), x + 8, y + 28, contentWidth - 18);
+        drawHintText(context, "当前群系：" + clientBiomeName(), x + 8, y + 44, contentWidth - 18);
 
         int buttonWidth = Math.max(68, Math.min(84, (contentWidth - 12) / 3));
         int buttonHeight = 26;
-        int currentX = x;
-        int currentY = y;
+        int currentX = x + 8;
+        int currentY = y + 66;
         String[][] actions = {
                 {"复制坐标", "copy_coords"},
                 {"公开坐标", "send_coords_public"},
                 {"私发坐标", "send_coords_private"}
         };
         for (String[] action : actions) {
-            if (currentX + buttonWidth > x + contentWidth) {
-                currentX = x;
+            if (currentX + buttonWidth > x + contentWidth - 10) {
+                currentX = x + 8;
                 currentY += buttonHeight + 6;
             }
-            addButton(action[0], "", action[1], "", "copy_coords".equals(action[1]), currentX, currentY, buttonWidth, buttonHeight);
+            addActionButton(action[0], "", action[1], "", "copy_coords".equals(action[1]), currentX, currentY, buttonWidth, buttonHeight);
             currentX += buttonWidth + 6;
         }
-        y = currentY + buttonHeight + 18;
+        y += currentCardHeight + 10;
 
-        context.drawText(textRenderer, Text.literal("坐标 HUD"), x, y, 0xFFFFFFFF, true);
-        y += 18;
         int hudButtonWidth = Math.max(84, Math.min(112, (contentWidth - 8) / 2));
-        addButton(ClientCoordinateHud.isEnabled() ? "HUD显示中" : "HUD已隐藏", "", "coordinate_hud_toggle", "", true, x, y, hudButtonWidth, 24);
-        addButton("编辑HUD位置", "", "coordinate_hud_edit", "", true, x + hudButtonWidth + 6, y, hudButtonWidth, 24);
-        y += 38;
+        boolean hudButtonsWrap = x + 8 + hudButtonWidth * 2 + 6 > x + contentWidth - 10;
+        int hudCardHeight = hudButtonsWrap ? 96 : 66;
+        drawCard(context, x - 4, y - 4, contentWidth - 2, hudCardHeight);
+        drawSectionTitle(context, "HUD 设置", x + 8, y + 8);
+        addToggleButton("坐标 HUD", ClientCoordinateHud.isEnabled(), "coordinate_hud_toggle", "", x + 8, y + 30, hudButtonWidth, 24);
+        addActionButton("编辑HUD位置", "", "coordinate_hud_edit", "", true,
+                hudButtonsWrap ? x + 8 : x + 8 + hudButtonWidth + 6,
+                hudButtonsWrap ? y + 60 : y + 30,
+                hudButtonWidth, 24);
+        y += hudCardHeight + 10;
 
         if (!recentCopiedCoordinates.isEmpty()) {
-            context.drawText(textRenderer, Text.literal("最近复制的坐标"), x, y, 0xFFFFFFFF, true);
-            y += 18;
+            int recentCardHeight = 28 + recentCopiedCoordinates.size() * 40 + 6;
+            drawCard(context, x - 4, y - 4, contentWidth - 2, recentCardHeight);
+            drawSectionTitle(context, "最近复制的坐标", x + 8, y + 8);
+            y += 30;
             for (String coordinate : recentCopiedCoordinates) {
                 int deleteWidth = 44;
-                int copyWidth = Math.max(92, contentWidth - deleteWidth - 12);
-                addButton("复制", coordinate, "copy_recent_coordinate", coordinate, true, x, y, copyWidth, 36);
-                addButton("删除", "", "delete_recent_coordinate", coordinate, true, x + copyWidth + 6, y, deleteWidth, 36);
+                int copyWidth = Math.max(92, contentWidth - deleteWidth - 26);
+                addActionButton("复制", coordinate, "copy_recent_coordinate", coordinate, true, x + 8, y, copyWidth, 36);
+                addDangerButton("删除", "", "delete_recent_coordinate", coordinate, true, x + 8 + copyWidth + 6, y, deleteWidth, 36);
                 y += 40;
             }
         }
@@ -642,21 +677,38 @@ public class FriendMenuScreen extends Screen {
     }
 
     private int renderTasksPage(DrawContext context, int x, int y, int contentWidth) {
-        int buttonWidth = Math.max(72, Math.min(100, (contentWidth - 8) / 2));
-        addButton("发布任务", "", "open_create_task", "", true, x, y, buttonWidth, 24);
-        addButton("历史任务", "", "open_task_history", "", true, x + buttonWidth + 6, y, buttonWidth, 24);
-        addButton(ClientTaskHud.isEnabled() ? "HUD显示中" : "HUD已隐藏", "", "task_hud_toggle", "", true, x, y + 30, buttonWidth, 24);
-        addButton("编辑HUD位置", "", "task_hud_edit", "", true, x + buttonWidth + 6, y + 30, buttonWidth, 24);
-        y += 62;
+        int cardWidth = contentWidth - 2;
+        boolean singleColumn = cardWidth < 250;
+        int buttonWidth = singleColumn ? Math.max(128, cardWidth - 24) : Math.max(92, (cardWidth - 30) / 2);
+        int actionCardHeight = singleColumn ? 154 : 94;
+
+        drawCard(context, x - 4, y - 4, cardWidth, actionCardHeight);
+        drawSectionTitle(context, "任务操作", x + 8, y + 8);
+        int buttonX = x + 8;
+        int buttonY = y + 32;
+        addActionButton("发布任务", "", "open_create_task", "", true, buttonX, buttonY, buttonWidth, 24);
+        addActionButton("历史任务", "", "open_task_history", "", true,
+                singleColumn ? buttonX : buttonX + buttonWidth + 8,
+                singleColumn ? buttonY + 30 : buttonY,
+                buttonWidth, 24);
+        addToggleButton("任务 HUD", ClientTaskHud.isEnabled(), "task_hud_toggle", "", buttonX,
+                singleColumn ? buttonY + 60 : buttonY + 30,
+                buttonWidth, 24);
+        addActionButton("编辑HUD位置", "", "task_hud_edit", "", true,
+                singleColumn ? buttonX : buttonX + buttonWidth + 8,
+                singleColumn ? buttonY + 90 : buttonY + 30,
+                buttonWidth, 24);
+        y += actionCardHeight + 10;
 
         List<ClientTask> activeTasks = tasks.stream()
                 .filter(task -> !isHistoricalTask(task))
                 .toList();
         if (activeTasks.isEmpty()) {
-            drawTextLine(context, "暂无进行中的任务。有什么目标都可以在这里写出来！", x, y, contentWidth);
-            y += 16;
-            drawTextLine(context, "可以多多发布任务，腐竹看到可能会在任务完成时给予丰厚奖励！", x, y, contentWidth);
-            return y + 24;
+            drawCard(context, x - 4, y - 4, cardWidth, 74);
+            drawSectionTitle(context, "暂无进行中的任务", x + 8, y + 8);
+            drawHintText(context, "有什么目标都可以在这里写出来。", x + 8, y + 32, cardWidth - 22);
+            drawHintText(context, "可以发布任务，邀请成员一起完成。", x + 8, y + 50, cardWidth - 22);
+            return y + 82;
         }
 
         for (ClientTask task : activeTasks) {
@@ -667,15 +719,20 @@ public class FriendMenuScreen extends Screen {
     }
 
     private int renderTaskHistoryPage(DrawContext context, int x, int y, int contentWidth) {
-        addButton("返回任务", "", "back_to_tasks", "", true, x, y, 72, 24);
-        y += 32;
+        int cardWidth = contentWidth - 2;
+        drawCard(context, x - 4, y - 4, cardWidth, 62);
+        drawSectionTitle(context, "历史任务", x + 8, y + 8);
+        addActionButton("返回任务", "", "back_to_tasks", "", true, x + 8, y + 32, 82, 24);
+        y += 72;
 
         List<ClientTask> historyTasks = tasks.stream()
                 .filter(task -> isHistoricalTask(task) && task.viewerJoined)
                 .toList();
         if (historyTasks.isEmpty()) {
-            drawTextLine(context, "暂无你参与过的历史任务。", x, y, contentWidth);
-            return y + 24;
+            drawCard(context, x - 4, y - 4, cardWidth, 58);
+            drawSectionTitle(context, "暂无历史任务", x + 8, y + 8);
+            drawHintText(context, "这里会显示你参与过的已完成或已结束任务。", x + 8, y + 32, cardWidth - 22);
+            return y + 66;
         }
 
         for (ClientTask task : historyTasks) {
@@ -688,51 +745,64 @@ public class FriendMenuScreen extends Screen {
     private int renderTaskDetailPage(DrawContext context, int x, int y, int contentWidth) {
         ClientTask task = findClientTask(selectedTaskId);
         boolean returnToHistory = selectedTaskDetailFromHistory || (task != null && isHistoricalTask(task));
-        addButton(returnToHistory ? "返回" : "返回任务", "", returnToHistory ? "back_to_task_history" : "back_to_tasks", "", true, x, y, returnToHistory ? 58 : 72, 24);
-        y += 36;
+        int cardWidth = contentWidth - 2;
+        addActionButton(returnToHistory ? "返回历史" : "返回任务", "", returnToHistory ? "back_to_task_history" : "back_to_tasks", "", true, x, y, returnToHistory ? 82 : 82, 24);
+        y += 34;
 
         if (task == null) {
-            drawTextLine(context, "找不到这个任务，可能已经结束或不可见。", x, y, contentWidth);
-            return y + 24;
+            drawCard(context, x - 4, y - 4, cardWidth, 58);
+            drawSectionTitle(context, "任务不可见", x + 8, y + 8);
+            drawHintText(context, "找不到这个任务，可能已经结束或不可见。", x + 8, y + 32, cardWidth - 22);
+            return y + 66;
         }
 
-        drawTextLine(context, task.title, x, y, contentWidth);
-        y += 16;
-        drawTextLine(context, "状态：" + taskStatusLabel(task.status) + "  可见：" + taskVisibilityLabel(task.visibility), x, y, contentWidth);
-        y += 14;
-        drawTextLine(context, "发布者：" + textOr(task.publisherName, "未知") + "  成员：" + task.participantCount + "  完成确认：" + task.voteCount + "/" + task.voteThreshold, x, y, contentWidth);
-        y += 14;
-        if (!safe(task.reward).isBlank()) {
-            drawTextLine(context, "奖励：" + task.reward, x, y, contentWidth);
-            y += 14;
-        }
-        if (!safe(task.description).isBlank()) {
-            drawTextLine(context, "说明：" + task.description, x, y, contentWidth);
-            y += 18;
-        }
+        drawCard(context, x - 4, y - 4, cardWidth, 90);
+        drawSectionTitle(context, "基础信息", x + 8, y + 8);
+        context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth(task.title, Math.max(20, cardWidth - 22))), x + 8, y + 30, 0xFFFFFFFF, true);
+        drawHintText(context, "状态：" + taskStatusLabel(task.status) + "    可见：" + taskVisibilityLabel(task.visibility), x + 8, y + 48, cardWidth - 22);
+        drawHintText(context, "发布者：" + textOr(task.publisherName, "未知") + "    成员：" + task.participantCount + "    完成确认：" + task.voteCount + "/" + task.voteThreshold, x + 8, y + 66, cardWidth - 22);
+        y += 100;
 
-        context.drawText(textRenderer, Text.literal("已加入玩家"), x, y, 0xFFFFFFFF, true);
-        y += 16;
+        drawCard(context, x - 4, y - 4, cardWidth, 58);
+        drawSectionTitle(context, "奖励", x + 8, y + 8);
+        drawHintText(context, textOr(task.reward, "暂无奖励内容。"), x + 8, y + 32, cardWidth - 22);
+        y += 68;
+
+        drawCard(context, x - 4, y - 4, cardWidth, 76);
+        drawSectionTitle(context, "说明", x + 8, y + 8);
+        int descBottom = drawWrappedText(context, textOr(task.description, "暂无说明。"), x + 8, y + 32, cardWidth - 22, 0xFFC9D4DE, 3);
+        y += Math.max(86, descBottom - y + 10);
+
         String[] participants = task.participants == null ? new String[0] : task.participants;
+        int participantCardHeight = Math.max(62, 34 + Math.max(1, participants.length) * 14 + 10);
+        drawCard(context, x - 4, y - 4, cardWidth, participantCardHeight);
+        drawSectionTitle(context, "已加入玩家", x + 8, y + 8);
+        int participantY = y + 32;
         if (participants.length == 0) {
-            drawTextLine(context, "暂无玩家。", x, y, contentWidth);
-            y += 16;
+            drawHintText(context, "暂无玩家。", x + 8, participantY, cardWidth - 22);
         } else {
             for (String participant : participants) {
-                drawTextLine(context, "- " + participant, x + 4, y, contentWidth - 4);
-                y += 14;
+                drawHintText(context, "- " + participant, x + 8, participantY, cardWidth - 22);
+                participantY += 14;
             }
         }
+        y += participantCardHeight + 10;
+
+        int actionRows = taskActionRows(task, contentWidth) + (task.canInvite ? 1 : 0);
+        int actionCardHeight = Math.max(64, 36 + actionRows * 26 + (task.canInvite && taskInviteListOpen ? 36 : 0));
+        drawCard(context, x - 4, y - 4, cardWidth, actionCardHeight);
+        drawSectionTitle(context, "可操作按钮", x + 8, y + 8);
+        ButtonCursor cursor = new ButtonCursor(x + 8, y + 34, x + contentWidth - 8);
+        renderTaskActionButtons(context, task, cursor);
 
         if (task.canInvite) {
-            y += 4;
-            addButton(taskInviteListOpen ? "收起邀请列表" : "邀请玩家加入", "", "task_toggle_invites", "", true, x, y, 96, 24);
-            y += 34;
+            addTaskCardButton(context, taskInviteListOpen ? "收起邀请" : "邀请玩家", "task_toggle_invites", task.id, cursor, 78, "");
             if (taskInviteListOpen) {
-                y = renderInvitePlayerButtons(context, task, x, y, contentWidth);
+                y = renderInvitePlayerButtons(context, task, x + 8, cursor.y + 30, contentWidth - 16);
+                return y + 10;
             }
         }
-        return y;
+        return y + actionCardHeight + 10;
     }
 
     private int renderTaskHudEditPage(DrawContext context, int x, int y, int contentWidth) {
@@ -853,9 +923,9 @@ public class FriendMenuScreen extends Screen {
 
     private int renderTaskCard(DrawContext context, ClientTask task, int x, int y, int contentWidth, boolean compact) {
         int actionRows = taskActionRows(task, contentWidth);
-        int textLines = 3 + (!safe(task.reward).isBlank() ? 1 : 0) + (!compact && !safe(task.description).isBlank() ? 1 : 0);
-        int minHeight = compact ? (contentWidth < 260 ? 112 : 88) : (contentWidth < 260 ? 158 : 122);
-        int cardHeight = Math.max(minHeight, 22 + textLines * 14 + 10 + actionRows * 26);
+        int textLines = 4 + (!safe(task.reward).isBlank() ? 1 : 0) + (!compact && !safe(task.description).isBlank() ? 1 : 0);
+        int minHeight = compact ? (contentWidth < 260 ? 128 : 104) : (contentWidth < 260 ? 174 : 138);
+        int cardHeight = Math.max(minHeight, 28 + textLines * 14 + 16 + actionRows * 26);
         int right = x + contentWidth - 6;
         boolean hovered = activeMouseX >= x && activeMouseX < right && activeMouseY >= y && activeMouseY < y + cardHeight;
         int fillColor = hovered ? 0x8842515E : 0x66303A46;
@@ -865,25 +935,35 @@ public class FriendMenuScreen extends Screen {
         context.fill(x, y + cardHeight - 1, right, y + cardHeight, borderColor);
         context.fill(x, y, x + 1, y + cardHeight, borderColor);
         context.fill(right - 1, y, right, y + cardHeight, borderColor);
+        context.fill(x + 2, y + 2, x + 5, y + cardHeight - 2, statusColor(task.status));
         taskClickAreas.add(new TaskClickArea(task.id, x, y, right - x, Math.max(24, cardHeight - actionRows * 26 - 8)));
 
-        int textX = x + 8;
+        int textX = x + 12;
         int lineY = y + 8;
-        drawTextLine(context, task.title, textX, lineY, contentWidth - 18);
-        lineY += 14;
-        drawTextLine(context, "状态：" + taskStatusLabel(task.status) + "  可见：" + taskVisibilityLabel(task.visibility) + "  发布者：" + textOr(task.publisherName, "未知"), textX, lineY, contentWidth - 18);
-        lineY += 14;
-        drawTextLine(context, "成员：" + task.participantCount + "  完成确认：" + task.voteCount + "/" + task.voteThreshold, textX, lineY, contentWidth - 18);
-        lineY += 14;
+        context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth(task.title, Math.max(20, contentWidth - 26))), textX, lineY, 0xFFFFFFFF, true);
+        lineY += 17;
+        drawHintText(context, "状态：" + taskStatusLabel(task.status) + "    可见：" + taskVisibilityLabel(task.visibility), textX, lineY, contentWidth - 26);
+        lineY += 15;
+        drawHintText(context, "发布者：" + textOr(task.publisherName, "未知"), textX, lineY, contentWidth - 26);
+        lineY += 15;
+        drawHintText(context, "成员：" + task.participantCount + "    完成确认：" + task.voteCount + "/" + task.voteThreshold, textX, lineY, contentWidth - 26);
+        lineY += 15;
         if (!safe(task.reward).isBlank()) {
-            drawTextLine(context, "奖励：" + task.reward, textX, lineY, contentWidth - 18);
-            lineY += 14;
+            context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth("奖励：" + task.reward, Math.max(20, contentWidth - 26))), textX, lineY, 0xFFFFD27D, false);
+            lineY += 15;
         }
         if (!compact && !safe(task.description).isBlank()) {
-            drawTextLine(context, task.description, textX, lineY, contentWidth - 18);
+            drawHintText(context, "说明：" + task.description, textX, lineY, contentWidth - 26);
         }
 
+        int separatorY = y + cardHeight - actionRows * 26 - 10;
+        context.fill(textX, separatorY, right - 8, separatorY + 1, 0x664C5A66);
         ButtonCursor cursor = new ButtonCursor(textX, y + cardHeight - actionRows * 26 - 4, right);
+        renderTaskActionButtons(context, task, cursor);
+        return y + cardHeight;
+    }
+
+    private void renderTaskActionButtons(DrawContext context, ClientTask task, ButtonCursor cursor) {
         int smallWidth = 50;
         boolean activeTask = !isHistoricalTask(task);
         if (task.canJoin) {
@@ -910,7 +990,6 @@ public class FriendMenuScreen extends Screen {
         if (!activeTask && task.viewerJoined) {
             addTaskCardButton(context, "删除", "task_delete_history", task.id, cursor, smallWidth, "从你的历史任务列表中删除。");
         }
-        return y + cardHeight;
     }
 
     private int taskActionRows(ClientTask task, int contentWidth) {
@@ -986,26 +1065,31 @@ public class FriendMenuScreen extends Screen {
 
     private int renderTaskFormPage(DrawContext context, int x, int y, int contentWidth, boolean editing) {
         taskDraft.ensureDefaults();
-        addButton("返回", "", "back_to_tasks", "", true, x, y, 58, 24);
-        y += 36;
+        int cardWidth = contentWidth - 2;
+        addActionButton("返回", "", "back_to_tasks", "", true, x, y, 58, 24);
+        y += 34;
 
-        y = addInput(context, taskDraft.title, "任务标题", x, y, contentWidth);
-        y = addInput(context, taskDraft.description, "任务说明", x, y, contentWidth);
+        int formCardHeight = (!editing || taskDraft.canChangeVisibility) ? 190 : 178;
+        drawCard(context, x - 4, y - 4, cardWidth, formCardHeight);
+        drawSectionTitle(context, editing ? "编辑任务" : "发布任务", x + 8, y + 8);
+        int formY = y + 32;
+        formY = addInput(context, taskDraft.title, "任务标题", x + 8, formY, cardWidth - 16);
+        formY = addInput(context, taskDraft.description, "任务说明", x + 8, formY, cardWidth - 16);
 
         if (!editing || taskDraft.canChangeVisibility) {
-            addButton(taskDraft.publicTask ? "可见性：公开" : "可见性：私人", "", "task_toggle_visibility", "", true, x, y, Math.min(112, contentWidth), 24);
-            y += 36;
+            addActionButton(taskDraft.publicTask ? "可见性：公开" : "可见性：私人", "", "task_toggle_visibility", "", true, x + 8, formY, Math.min(132, cardWidth - 18), 24);
+            formY += 34;
         } else {
-            drawTextLine(context, "可见性：" + (taskDraft.publicTask ? "公开" : "私人"), x, y, contentWidth);
-            y += 22;
+            drawHintText(context, "可见性：" + (taskDraft.publicTask ? "公开" : "私人"), x + 8, formY, cardWidth - 22);
+            formY += 24;
         }
 
-        addButton(editing ? "保存任务" : "发布任务", "", editing ? "task_submit_edit" : "task_submit_create", "", true, x, y, Math.min(92, contentWidth), 26);
+        addActionButton(editing ? "保存" : "发布", "", editing ? "task_submit_edit" : "task_submit_create", "", true, x + 8, formY, Math.min(82, cardWidth - 18), 24);
         if (!taskFormMessage.isBlank()) {
-            int messageX = x + Math.min(92, contentWidth) + 8;
-            drawInlineStatus(context, taskFormMessage, messageX, y + 9, x + contentWidth - messageX, false);
+            int messageX = x + Math.min(82, cardWidth - 18) + 18;
+            drawInlineStatus(context, taskFormMessage, messageX, formY + 9, x + contentWidth - messageX, false);
         }
-        return y + 38;
+        return y + formCardHeight + 10;
     }
 
     private int renderActivityPage(DrawContext context, int x, int y, int contentWidth) {
@@ -1132,19 +1216,113 @@ public class FriendMenuScreen extends Screen {
         return y + 198;
     }
 
+    private int renderSettingsPage(DrawContext context, int x, int y, int contentWidth) {
+        int cardWidth = contentWidth - 2;
+        int buttonWidth = Math.max(126, Math.min(170, cardWidth - 24));
+
+        drawCard(context, x - 4, y - 4, cardWidth, 66);
+        drawSectionTitle(context, "个人设置", x + 8, y + 8);
+        addToggleButton("自动领取活动物品", playerSettings.autoClaimActivityItems, "setting_auto_claim_activity_items", "", x + 8, y + 32, buttonWidth, 24);
+        y += 76;
+
+        int hudButtonWidth = Math.max(104, Math.min(138, (cardWidth - 28) / 2));
+        boolean hudSettingsWrap = x + 8 + hudButtonWidth * 2 + 8 > x + cardWidth - 8;
+        int hudSettingsCardHeight = hudSettingsWrap ? 104 : 74;
+        drawCard(context, x - 4, y - 4, cardWidth, hudSettingsCardHeight);
+        drawSectionTitle(context, "HUD 开关", x + 8, y + 8);
+        addToggleButton("坐标 HUD", ClientCoordinateHud.isEnabled(), "coordinate_hud_toggle", "", x + 8, y + 32, hudButtonWidth, 24);
+        addToggleButton("任务 HUD", ClientTaskHud.isEnabled(), "task_hud_toggle", "",
+                hudSettingsWrap ? x + 8 : x + 8 + hudButtonWidth + 8,
+                hudSettingsWrap ? y + 62 : y + 32,
+                hudButtonWidth, 24);
+        y += hudSettingsCardHeight + 10;
+
+        return y;
+    }
+
     private int renderAdminPage(DrawContext context, int x, int y, int contentWidth) {
         if (!canUseAdmin) {
             selectedPage = Page.TELEPORT;
             return y;
         }
 
-        int columnWidth = Math.max(92, (contentWidth - 8) / 2);
-        addButton("时间管理", "白天、正午、夜晚、午夜", "admin_page", "admin_time", true, x, y, columnWidth, 40);
-        addButton("天气管理", "晴天、下雨、雷暴", "admin_page", "admin_weather", true, x + columnWidth + 8, y, columnWidth, 40);
-        addButton("玩家管理", "模式、飞行、状态、踢出和权限", "admin_page", "admin_players", true, x, y + 48, columnWidth, 40);
-        addButton("清理管理", "清理掉落物、经验球、箭矢和怪物", "admin_page", "admin_cleanup", true, x + columnWidth + 8, y + 48, columnWidth, 40);
-        addButton("重载配置", "重新读取 friendservermenu.json", "admin_reload_config", "", false, x, y + 96, contentWidth - 6, 40);
-        return y + 144;
+        int cardWidth = contentWidth - 2;
+        int buttonWidth = Math.max(112, Math.min(154, (cardWidth - 30) / 2));
+        boolean singleColumn = cardWidth < 270;
+        if (singleColumn) {
+            buttonWidth = Math.max(128, cardWidth - 24);
+        }
+
+        drawCard(context, x - 4, y - 4, cardWidth, 96);
+        drawSectionTitle(context, "服务器状态", x + 8, y + 8);
+        drawHintText(context, "在线人数：" + serverStatus.onlinePlayers + " / " + serverStatus.maxPlayers, x + 8, y + 32, cardWidth - 22);
+        if (activeActivity == null) {
+            drawHintText(context, "当前没有进行中的活动", x + 8, y + 50, cardWidth - 22);
+        } else {
+            drawHintText(context, "活动类型：" + activityCategoryLabel(activeActivity.category), x + 8, y + 50, cardWidth - 22);
+            drawHintText(context, "活动标题：" + textOr(activeActivity.title, activeActivity.description), x + 8, y + 68, cardWidth - 22);
+        }
+        y += 106;
+
+        drawCard(context, x - 4, y - 4, cardWidth, singleColumn ? 94 : 66);
+        drawSectionTitle(context, "服务器功能开关", x + 8, y + 8);
+        addToggleButton("死亡点功能", serverFeatureSettings.deathPointEnabled, "server_feature_death_point_enabled", "", x + 8, y + 32, buttonWidth, 24);
+        addToggleButton("死亡点聊天提示", serverFeatureSettings.deathPointChatEnabled, "server_feature_death_point_chat_enabled", "",
+                singleColumn ? x + 8 : x + 8 + buttonWidth + 8,
+                singleColumn ? y + 62 : y + 32,
+                buttonWidth, 24);
+        y += singleColumn ? 104 : 76;
+
+        int activityCardHeight = singleColumn ? 154 : 94;
+        drawCard(context, x - 4, y - 4, cardWidth, activityCardHeight);
+        drawSectionTitle(context, "活动管理", x + 8, y + 8);
+        int activityY = y + 32;
+        addActionButton("发布发物品活动", "", "admin_publish_item_activity", "", true, x + 8, activityY, buttonWidth, 24);
+        addActionButton("发布通知活动", "", "admin_publish_notice_activity", "", true,
+                singleColumn ? x + 8 : x + 8 + buttonWidth + 8,
+                singleColumn ? activityY + 30 : activityY,
+                buttonWidth, 24);
+        if (activeActivity == null) {
+            addDisabledButton("无活动可结束", "当前没有进行中的活动", "admin_activity_end_disabled", "", x + 8,
+                    singleColumn ? activityY + 60 : activityY + 30,
+                    buttonWidth, 24);
+        } else {
+            addDangerButton("结束当前活动", "", "activity_end", safe(activeActivity.id), false, x + 8,
+                    singleColumn ? activityY + 60 : activityY + 30,
+                    buttonWidth, 24);
+        }
+        addActionButton("查看活动状态", "", "admin_view_activity", "", true,
+                singleColumn ? x + 8 : x + 8 + buttonWidth + 8,
+                singleColumn ? activityY + 90 : activityY + 30,
+                buttonWidth, 24);
+        y += activityCardHeight + 10;
+
+        int opsCardHeight = singleColumn ? 230 : 180;
+        drawCard(context, x - 4, y - 4, cardWidth, opsCardHeight);
+        drawSectionTitle(context, "OP 操作", x + 8, y + 8);
+        int opsY = y + 32;
+        addActionButton("时间管理", "白天、正午、夜晚、午夜", "admin_page", "admin_time", true, x + 8, opsY, buttonWidth, 40);
+        addActionButton("天气管理", "晴天、下雨、雷暴", "admin_page", "admin_weather", true,
+                singleColumn ? x + 8 : x + 8 + buttonWidth + 8,
+                singleColumn ? opsY + 48 : opsY,
+                buttonWidth, 40);
+        addActionButton("玩家管理", "模式、飞行、状态、踢出和权限", "admin_page", "admin_players", true, x + 8,
+                singleColumn ? opsY + 96 : opsY + 48,
+                buttonWidth, 40);
+        addActionButton("清理管理", "清理掉落物、经验球、箭矢和怪物", "admin_page", "admin_cleanup", true,
+                singleColumn ? x + 8 : x + 8 + buttonWidth + 8,
+                singleColumn ? opsY + 144 : opsY + 48,
+                buttonWidth, 40);
+        if (!singleColumn) {
+            addActionButton("重载配置", "重新读取 friendservermenu.json", "admin_reload_config", "", false, x + 8, opsY + 96, buttonWidth * 2 + 8, 40);
+        } else {
+            y += opsCardHeight + 10;
+            drawCard(context, x - 4, y - 4, cardWidth, 66);
+            drawSectionTitle(context, "配置", x + 8, y + 8);
+            addActionButton("重载配置", "重新读取 friendservermenu.json", "admin_reload_config", "", false, x + 8, y + 32, buttonWidth, 24);
+            return y + 76;
+        }
+        return y + opsCardHeight + 10;
     }
 
     private int renderAdminTimePage(DrawContext context, int x, int y, int contentWidth) {
@@ -1303,7 +1481,28 @@ public class FriendMenuScreen extends Screen {
     }
 
     private void addButton(String title, String description, String actionId, String argument, boolean localOnly, int x, int y, int width, int height) {
-        MenuButton menuButton = new MenuButton(title, description, actionId, argument, localOnly);
+        addStyledButton(title, description, actionId, argument, localOnly, x, y, width, height, MenuButton.Variant.NORMAL);
+    }
+
+    private void addActionButton(String title, String description, String actionId, String argument, boolean localOnly, int x, int y, int width, int height) {
+        addStyledButton(title, description, actionId, argument, localOnly, x, y, width, height, MenuButton.Variant.NORMAL);
+    }
+
+    private void addDangerButton(String title, String description, String actionId, String argument, boolean localOnly, int x, int y, int width, int height) {
+        addStyledButton(title, description, actionId, argument, localOnly, x, y, width, height, MenuButton.Variant.DANGER);
+    }
+
+    private void addDisabledButton(String title, String description, String actionId, String argument, int x, int y, int width, int height) {
+        addStyledButton(title, description, actionId, argument, true, x, y, width, height, MenuButton.Variant.DISABLED);
+    }
+
+    private void addToggleButton(String title, boolean enabled, String actionId, String argument, int x, int y, int width, int height) {
+        addStyledButton(title + "：" + (enabled ? "开" : "关"), "", actionId, argument, true, x, y, width, height,
+                enabled ? MenuButton.Variant.TOGGLE_ON : MenuButton.Variant.TOGGLE_OFF);
+    }
+
+    private void addStyledButton(String title, String description, String actionId, String argument, boolean localOnly, int x, int y, int width, int height, MenuButton.Variant variant) {
+        MenuButton menuButton = new MenuButton(title, description, actionId, argument, localOnly, variant);
         menuButton.setBounds(x, y, width, height);
         buttons.add(menuButton);
         if (activeRenderContext != null && activeRenderLayout != null && buttonVisible(menuButton, activeRenderLayout)) {
@@ -1324,6 +1523,40 @@ public class FriendMenuScreen extends Screen {
 
     private void drawTextLine(DrawContext context, String text, int x, int y, int width) {
         context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth(text, Math.max(20, width - 8))), x, y, 0xFFDDE7F0, false);
+    }
+
+    private void drawSectionTitle(DrawContext context, String title, int x, int y) {
+        context.drawText(textRenderer, Text.literal(title), x, y, 0xFFFFFFFF, true);
+        int underlineWidth = Math.max(32, Math.min(96, textRenderer.getWidth(title) + 18));
+        context.fill(x, y + 12, x + underlineWidth, y + 13, 0xFF6FA8DC);
+    }
+
+    private void drawCard(DrawContext context, int x, int y, int width, int height) {
+        if (width <= 6 || height <= 6) {
+            return;
+        }
+        context.fill(x, y, x + width, y + height, 0x88303A46);
+        context.fill(x, y, x + width, y + 1, 0xFF4C5A66);
+        context.fill(x, y + height - 1, x + width, y + height, 0xFF4C5A66);
+        context.fill(x, y, x + 1, y + height, 0xFF4C5A66);
+        context.fill(x + width - 1, y, x + width, y + height, 0xFF4C5A66);
+    }
+
+    private void drawHintText(DrawContext context, String text, int x, int y, int width) {
+        context.drawText(textRenderer, Text.literal(textRenderer.trimToWidth(safe(text), Math.max(20, width - 8))), x, y, 0xFFC9D4DE, false);
+    }
+
+    private int drawWrappedText(DrawContext context, String text, int x, int y, int width, int color, int maxLines) {
+        List<OrderedText> lines = textRenderer.wrapLines(Text.literal(safe(text)), Math.max(20, width));
+        int rendered = 0;
+        for (OrderedText line : lines) {
+            if (rendered >= Math.max(1, maxLines)) {
+                break;
+            }
+            context.drawText(textRenderer, line, x, y + rendered * 12, color, false);
+            rendered++;
+        }
+        return y + Math.max(1, rendered) * 12;
     }
 
     private void drawInlineStatus(DrawContext context, String message, int x, int y, int width, boolean success) {
@@ -1404,15 +1637,33 @@ public class FriendMenuScreen extends Screen {
             case "activity_claim_item" -> "领取本次发物品活动的奖励。";
             case "activity_teleport" -> "传送到当前活动集合点。";
             case "activity_end" -> "结束当前活动通知。";
+            case "server_feature_death_point_enabled" -> "服务器全局开关。关闭后不再记录任何玩家死亡点，并清空当前死亡点。";
+            case "server_feature_death_point_chat_enabled" -> "服务器全局开关。关闭后仍会记录死亡点，但不发送聊天栏传送提示。";
+            case "setting_auto_claim_activity_items" -> "开启后遇到发物品活动会自动尝试领取一次，不会绕过重复领取校验。";
+            case "admin_publish_item_activity" -> "打开活动表单并预设为发物品活动，提交仍走服务端活动校验。";
+            case "admin_publish_notice_activity" -> "打开活动表单并预设为通知活动，提交仍走服务端活动校验。";
+            case "admin_view_activity" -> "查看当前活动详情，也可以在这里结束当前活动。";
+            case "admin_activity_end_disabled" -> "当前没有进行中的活动。";
             default -> "";
         };
     }
 
     private void drawTooltip(DrawContext context, String message, int mouseX, int mouseY) {
-        int maxTooltipWidth = Math.max(60, Math.min(240, width - 16));
-        String text = textRenderer.trimToWidth(message, maxTooltipWidth - 12);
-        int tooltipWidth = textRenderer.getWidth(text) + 12;
-        int tooltipHeight = 18;
+        int maxTooltipWidth = Math.max(60, Math.min(260, width - 16));
+        List<OrderedText> lines = textRenderer.wrapLines(Text.literal(safe(message)), maxTooltipWidth - 12);
+        if (lines.isEmpty()) {
+            return;
+        }
+        int textWidth = 0;
+        for (OrderedText line : lines) {
+            textWidth = Math.max(textWidth, textRenderer.getWidth(line));
+        }
+        int horizontalPadding = 8;
+        int verticalPadding = 6;
+        int lineStep = 12;
+        int textBlockHeight = (lines.size() - 1) * lineStep + textRenderer.fontHeight;
+        int tooltipWidth = Math.min(maxTooltipWidth, textWidth + horizontalPadding * 2);
+        int tooltipHeight = textBlockHeight + verticalPadding * 2;
         int tooltipX = clamp(mouseX + 12, 4, Math.max(4, width - tooltipWidth - 4));
         int tooltipY = mouseY + 14;
         if (tooltipY + tooltipHeight > height - 4) {
@@ -1425,7 +1676,12 @@ public class FriendMenuScreen extends Screen {
         context.fill(tooltipX, tooltipY + tooltipHeight - 1, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xFF7FC2FF);
         context.fill(tooltipX, tooltipY, tooltipX + 1, tooltipY + tooltipHeight, 0xFF7FC2FF);
         context.fill(tooltipX + tooltipWidth - 1, tooltipY, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xFF7FC2FF);
-        context.drawText(textRenderer, Text.literal(text), tooltipX + 6, tooltipY + 5, 0xFFDDE7F0, false);
+        int textY = tooltipY + (tooltipHeight - textBlockHeight) / 2;
+        for (int i = 0; i < lines.size(); i++) {
+            OrderedText line = lines.get(i);
+            int textX = tooltipX + (tooltipWidth - textRenderer.getWidth(line)) / 2;
+            context.drawText(textRenderer, line, textX, textY + i * lineStep, 0xFFDDE7F0, false);
+        }
     }
 
     private void runButton(MenuButton button) {
@@ -1513,6 +1769,22 @@ public class FriendMenuScreen extends Screen {
             }
             case "activity_end" -> ClientPlayNetworking.send(new MenuActionPayload(button.actionId(), button.argument()));
             case "activity_claim_item" -> ClientPlayNetworking.send(new MenuActionPayload(button.actionId(), button.argument()));
+            case "server_feature_death_point_enabled" -> requestServerFeatureSetting(FEATURE_DEATH_POINT_ENABLED, !serverFeatureSettings.deathPointEnabled);
+            case "server_feature_death_point_chat_enabled" -> requestServerFeatureSetting(FEATURE_DEATH_POINT_CHAT_ENABLED, !serverFeatureSettings.deathPointChatEnabled);
+            case "setting_auto_claim_activity_items" -> requestPlayerSetting(SETTING_AUTO_CLAIM_ACTIVITY_ITEMS, !playerSettings.autoClaimActivityItems);
+            case "admin_publish_item_activity" -> {
+                activityDraft.reset();
+                activityDraft.applyTemplate("item_give");
+                selectPage(Page.ACTIVITY);
+            }
+            case "admin_publish_notice_activity" -> {
+                activityDraft.reset();
+                activityDraft.applyTemplate("custom");
+                selectPage(Page.ACTIVITY);
+            }
+            case "admin_view_activity" -> selectPage(Page.ACTIVITY);
+            case "admin_activity_end_disabled", "noop" -> {
+            }
             case "copy_coords" -> {
                 copyCoordinateText(clientCoordinates());
                 close();
@@ -1536,6 +1808,35 @@ public class FriendMenuScreen extends Screen {
                 }
             }
         }
+    }
+
+    private void requestPlayerSetting(String key, boolean value) {
+        switch (key) {
+            case SETTING_AUTO_CLAIM_ACTIVITY_ITEMS -> playerSettings.autoClaimActivityItems = value;
+            default -> {
+                return;
+            }
+        }
+        ClientPlayNetworking.send(new UpdatePlayerSettingsPayload(key, value));
+    }
+
+    private void requestServerFeatureSetting(String key, boolean value) {
+        if (!canUseAdmin) {
+            return;
+        }
+        switch (key) {
+            case FEATURE_DEATH_POINT_ENABLED -> {
+                serverFeatureSettings.deathPointEnabled = value;
+                if (!value) {
+                    serverStatus.deathPoint = null;
+                }
+            }
+            case FEATURE_DEATH_POINT_CHAT_ENABLED -> serverFeatureSettings.deathPointChatEnabled = value;
+            default -> {
+                return;
+            }
+        }
+        ClientPlayNetworking.send(new UpdateServerFeatureSettingsPayload(key, value));
     }
 
     private void submitLocation(boolean editing) {
@@ -1785,7 +2086,7 @@ public class FriendMenuScreen extends Screen {
         if (selectedPage == Page.SETUP) {
             return List.of(Page.SETUP);
         }
-        List<Page> pages = new ArrayList<>(List.of(Page.TELEPORT, Page.COORDINATES, Page.TASKS, Page.ACTIVITY, Page.STATUS));
+        List<Page> pages = new ArrayList<>(List.of(Page.TELEPORT, Page.COORDINATES, Page.TASKS, Page.ACTIVITY, Page.STATUS, Page.SETTINGS));
         if (canUseAdmin) {
             pages.add(Page.ADMIN);
         }
@@ -1810,15 +2111,15 @@ public class FriendMenuScreen extends Screen {
     }
 
     private Layout layout() {
-        int panelWidth = Math.min(540, Math.max(300, width - 24));
-        int panelHeight = Math.min(315, Math.max(220, height - 24));
+        int panelWidth = Math.min(620, Math.max(320, width - 24));
+        int panelHeight = Math.min(380, Math.max(240, height - 24));
         int panelX = (width - panelWidth) / 2;
         int panelY = (height - panelHeight) / 2;
-        int navWidth = Math.min(102, Math.max(84, panelWidth / 4));
-        int contentX = panelX + navWidth + 12;
-        int contentY = panelY + 38;
-        int contentWidth = panelWidth - navWidth - 24;
-        int contentBottom = panelY + panelHeight - 10;
+        int navWidth = Math.min(120, Math.max(92, panelWidth / 5));
+        int contentX = panelX + navWidth + 14;
+        int contentY = panelY + 42;
+        int contentWidth = panelWidth - navWidth - 28;
+        int contentBottom = panelY + panelHeight - 12;
         return new Layout(panelX, panelY, panelWidth, panelHeight, navWidth, contentX, contentY, contentWidth, contentBottom);
     }
 
@@ -2089,6 +2390,15 @@ public class FriendMenuScreen extends Screen {
         };
     }
 
+    private static int statusColor(String status) {
+        return switch (safe(status)) {
+            case "voting" -> 0xFFFFD27D;
+            case "completed" -> 0xFF77E287;
+            case "ended" -> 0xFFB9C4CE;
+            default -> 0xFF7FC2FF;
+        };
+    }
+
     private static boolean isHistoricalTask(ClientTask task) {
         return task != null && isHistoricalTaskStatus(task.status);
     }
@@ -2199,6 +2509,7 @@ public class FriendMenuScreen extends Screen {
         TASK_HUD_EDIT("task_hud_edit", "编辑HUD位置"),
         ACTIVITY("activity", "活动"),
         STATUS("status", "状态"),
+        SETTINGS("settings", "设置"),
         ADMIN("admin", "服主管理"),
         ADMIN_TIME("admin_time", "时间管理"),
         ADMIN_WEATHER("admin_weather", "天气管理"),
@@ -2670,6 +2981,15 @@ public class FriendMenuScreen extends Screen {
         static ClientStatus empty() {
             return new ClientStatus();
         }
+    }
+
+    private static class ClientPlayerSettings {
+        boolean autoClaimActivityItems;
+    }
+
+    private static class ClientServerFeatureSettings {
+        boolean deathPointEnabled = true;
+        boolean deathPointChatEnabled = true;
     }
 
     private static class ClientDeathPoint {

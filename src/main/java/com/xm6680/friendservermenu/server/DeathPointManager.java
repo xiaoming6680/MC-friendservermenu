@@ -60,6 +60,9 @@ public final class DeathPointManager {
         if (player == null) {
             return;
         }
+        if (!ServerFeatureSettingsManager.deathPointEnabled()) {
+            return;
+        }
 
         ServerWorld world = player.getEntityWorld();
         BlockPos pos = player.getBlockPos();
@@ -74,6 +77,9 @@ public final class DeathPointManager {
 
         DEATH_POINTS.put(point.ownerUuid, point);
         save();
+        if (!ServerFeatureSettingsManager.deathPointChatEnabled()) {
+            return;
+        }
         MutableText message = Text.literal("刚刚的死亡点：" + format(point)).formatted(Formatting.RED);
         message.append(Text.literal(" [点我传送]").styled(style -> style
                 .withColor(Formatting.GREEN)
@@ -86,6 +92,9 @@ public final class DeathPointManager {
             return null;
         }
         DeathPoint point = DEATH_POINTS.get(player.getUuid().toString());
+        if (!ServerFeatureSettingsManager.deathPointEnabled()) {
+            return null;
+        }
         if (point == null) {
             return null;
         }
@@ -110,10 +119,35 @@ public final class DeathPointManager {
         player.sendMessage(Text.literal("死亡点已删除。"), false);
     }
 
+    public static synchronized boolean clearDeathPoint(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        DeathPoint removed = DEATH_POINTS.remove(player.getUuid().toString());
+        if (removed != null) {
+            save();
+            return true;
+        }
+        return false;
+    }
+
+    public static synchronized boolean clearAllDeathPoints() {
+        if (DEATH_POINTS.isEmpty()) {
+            return false;
+        }
+        DEATH_POINTS.clear();
+        save();
+        return true;
+    }
+
     public static void teleportToDeathPoint(ServerPlayerEntity player) {
         DeathPoint point;
         synchronized (DeathPointManager.class) {
             if (player == null) {
+                return;
+            }
+            if (!ServerFeatureSettingsManager.deathPointEnabled()) {
+                player.sendMessage(Text.literal("死亡点功能当前已关闭。"), false);
                 return;
             }
             point = DEATH_POINTS.get(player.getUuid().toString());

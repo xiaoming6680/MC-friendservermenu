@@ -1,4 +1,13 @@
 {
   "key.category.friendservermenu.menu": "小铭的服务器菜单",
-  "key.friendservermenu.open_menu": "打开服务器菜单"
+  "key.friendservermenu.open_menu": "打开服务器菜单",
+  "gui.friendservermenu.page.settings": "设置",
+  "gui.friendservermenu.settings.personal_settings": "个人设置",
+  "gui.friendservermenu.settings.hud_toggles": "HUD 开关",
+  "gui.friendservermenu.admin.server_feature_toggles": "服务器功能开关",
+  "gui.friendservermenu.settings.death_point_enabled": "死亡点功能",
+  "gui.friendservermenu.settings.death_point_chat_enabled": "死亡点聊天提示",
+  "gui.friendservermenu.settings.auto_claim_activity_items": "自动领取活动物品",
+  "gui.friendservermenu.settings.coordinate_hud": "坐标 HUD",
+  "gui.friendservermenu.settings.task_hud": "任务 HUD"
 }

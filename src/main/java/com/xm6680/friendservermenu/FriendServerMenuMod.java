@@ -13,6 +13,8 @@ import com.xm6680.friendservermenu.network.ModNetworking;
 import com.xm6680.friendservermenu.server.AdminActionManager;
 import com.xm6680.friendservermenu.server.ActivityManager;
 import com.xm6680.friendservermenu.server.DeathPointManager;
+import com.xm6680.friendservermenu.server.PlayerSettingsManager;
+import com.xm6680.friendservermenu.server.ServerFeatureSettingsManager;
 import com.xm6680.friendservermenu.server.TaskManager;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -38,6 +40,8 @@ public class FriendServerMenuMod implements ModInitializer {
         ModNetworking.registerCommon();
         ServerLifecycleEvents.SERVER_STARTED.register(TaskManager::load);
         ServerLifecycleEvents.SERVER_STARTED.register(DeathPointManager::load);
+        ServerLifecycleEvents.SERVER_STARTED.register(PlayerSettingsManager::load);
+        ServerLifecycleEvents.SERVER_STARTED.register(ServerFeatureSettingsManager::load);
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (entity instanceof ServerPlayerEntity player) {
                 DeathPointManager.recordDeath(player);
@@ -48,7 +52,10 @@ public class FriendServerMenuMod implements ModInitializer {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
                 server.execute(() -> {
                     ActivityManager.notifyActiveActivityOnJoin(handler.player);
+                    ActivityManager.tryAutoClaimForPlayer(handler.player);
                     TaskManager.sendTasksOnJoin(handler.player);
+                    ModNetworking.sendPlayerSettings(handler.player);
+                    ModNetworking.sendServerFeatureSettings(handler.player);
                     if (ModConfigManager.needsInitialization() && ModNetworking.canUseAdmin(handler.player)) {
                         ModNetworking.sendMenu(handler.player, "setup");
                     }
