@@ -3,7 +3,7 @@
 `friendservermenu` 是一个面向 Minecraft 好友服的轻量 Fabric MOD，提供游戏内自定义菜单，用于公共传送点、坐标分享、任务、活动、服务器状态和 OP 管理。
 
 - MOD ID：`friendservermenu`
-- 当前版本：`1.3.0`
+- 当前版本：`1.4.0`
 - Minecraft：`1.21.11`
 - Fabric Loader：`0.19.2+`
 - Fabric API：`0.141.4+1.21.11`
@@ -15,7 +15,7 @@
 
 1. 安装对应 Minecraft `1.21.11` 的 Fabric 客户端/服务端。
 2. 将 Fabric API 放入 `mods` 文件夹。
-3. 将 `friendservermenu-1.3.0.jar` 放入客户端和服务端的 `mods` 文件夹。
+3. 将 `friendservermenu-1.4.0.jar` 放入客户端和服务端的 `mods` 文件夹。
 4. 启动游戏或服务器。
 
 首次使用时，如果 `config/friendservermenu.json` 尚未初始化，OP 打开 `/menu` 会进入初始化界面，用于设置 GUI 左上角名称。
@@ -100,7 +100,7 @@ config/friendservermenu-coordinate-hud.json
 - 任务完成：当前任务至少 50% 成员确认完成后，任务完成并进入历史。
 - 任务奖励：奖励箱物品会复制给参与者；背包放不下会掉落在玩家身边。
 - 维护活动：维护倒计时结束后服务端执行停服。
-- 发物品活动：手动领取和自动领取共用同一套服务端重复领取校验。
+- 发物品活动：OP 通过活动物品箱配置发放内容，手动领取和自动领取共用同一套服务端重复领取校验。
 
 ## 构建
 
@@ -113,8 +113,8 @@ Windows PowerShell：
 产物：
 
 ```text
-build/libs/friendservermenu-1.3.0.jar
-build/libs/friendservermenu-1.3.0-sources.jar
+build/libs/friendservermenu-1.4.0.jar
+build/libs/friendservermenu-1.4.0-sources.jar
 ```
 
 ## 项目结构

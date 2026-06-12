@@ -38,6 +38,7 @@ public final class ServerActionHandler {
             case "activity_request" -> player.sendMessage(Text.literal("活动组织功能已改为 OP 模板。"), false);
             case "activity_end" -> ActivityManager.endActivity(player, argument);
             case "activity_claim_item" -> ActivityManager.claimItem(player, argument);
+            case "activity_items_open" -> ActivityManager.openDraftItemInventory(player);
             case "admin_day" -> AdminActionManager.setDay(player);
             case "admin_noon" -> AdminActionManager.setNoon(player);
             case "admin_night" -> AdminActionManager.setNight(player);

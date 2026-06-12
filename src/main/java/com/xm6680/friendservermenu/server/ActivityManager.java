@@ -2,12 +2,12 @@ package com.xm6680.friendservermenu.server;
 
 import com.xm6680.friendservermenu.FriendServerMenuMod;
 import com.xm6680.friendservermenu.network.ModNetworking;
-import net.minecraft.item.Item;
+import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
+import net.minecraft.screen.GenericContainerScreenHandler;
+import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -23,12 +23,16 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 public final class ActivityManager {
     private static final DateTimeFormatter END_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final int[] MAINTENANCE_REMINDERS = {60, 30, 15, 10, 5, 4, 3, 2, 1};
+    private static final int ACTIVITY_ITEM_INVENTORY_SIZE = 27;
+    private static final Map<UUID, SimpleInventory> DRAFT_ITEM_INVENTORIES = new LinkedHashMap<>();
     private static ActiveActivity activeActivity;
 
     private ActivityManager() {
@@ -48,7 +52,9 @@ public final class ActivityManager {
             return;
         }
 
-        String validationError = validate(submitted);
+        String category = normalizeCategory(submitted.category);
+        SimpleInventory draftItemInventory = "item_give".equals(category) ? draftItemInventory(player) : null;
+        String validationError = validate(submitted, draftItemInventory);
         if (validationError != null) {
             player.sendMessage(Text.literal(validationError), false);
             return;
@@ -58,7 +64,7 @@ public final class ActivityManager {
         ActiveActivity activity = new ActiveActivity();
         activity.id = UUID.randomUUID().toString();
         activity.initiator = player.getName().getString();
-        activity.category = normalizeCategory(submitted.category);
+        activity.category = category;
         activity.title = clean(submitted.title, 40);
         activity.description = clean(submitted.description, 160);
         activity.meetingPoint = needsMeetingPoint(activity.category) ? clean(submitted.meetingPoint, 80) : "";
@@ -66,8 +72,18 @@ public final class ActivityManager {
         activity.hasEndDate = needsEndDate(activity.category) && submitted.hasEndDate;
         activity.endDateText = activity.hasEndDate ? clean(submitted.endDateText, 32) : "";
         activity.expiresAtMillis = activity.hasEndDate ? parseEndDate(submitted.endDateText) : 0L;
-        activity.itemId = clean(submitted.itemId, 80);
-        activity.itemCount = Math.max(1, Math.min(64, submitted.itemCount));
+        activity.itemInventory = new SimpleInventory(ACTIVITY_ITEM_INVENTORY_SIZE);
+        if ("item_give".equals(activity.category)) {
+            copyInventory(draftItemInventory, activity.itemInventory);
+            activity.itemSummary = itemSummary(activity.itemInventory, "活动物品箱");
+            activity.itemId = activity.itemSummary;
+            activity.itemCount = totalItemCount(activity.itemInventory);
+            clearInventory(draftItemInventory);
+        } else {
+            activity.itemSummary = "";
+            activity.itemId = "";
+            activity.itemCount = 0;
+        }
         activity.maintenanceTimeText = clean(submitted.maintenanceTimeText, 40);
         activity.maintenanceCountdownSeconds = Math.max(5, Math.min(86400, submitted.maintenanceCountdownSeconds));
         activity.maintenanceEndsAtMillis = "maintenance".equals(activity.category)
@@ -90,6 +106,19 @@ public final class ActivityManager {
             }
         }
         ModNetworking.broadcastMenuData(server);
+    }
+
+    public static void openDraftItemInventory(ServerPlayerEntity player) {
+        if (!ModNetworking.canUseAdmin(player)) {
+            player.sendMessage(Text.literal("只有 OP 可以配置活动发物品箱。"), false);
+            return;
+        }
+
+        SimpleInventory inventory = draftItemInventory(player);
+        player.openHandledScreen(new SimpleNamedScreenHandlerFactory(
+                (syncId, playerInventory, user) -> GenericContainerScreenHandler.createGeneric9x3(syncId, playerInventory, inventory),
+                Text.literal("活动发物品箱")
+        ));
     }
 
     public static void tickActivities(MinecraftServer server) {
@@ -176,18 +205,23 @@ public final class ActivityManager {
             return;
         }
 
-        Item item = activityItem(activity);
-        if (item == Items.AIR) {
-            player.sendMessage(Text.literal("活动物品配置无效，无法领取。"), false);
+        if (!hasItems(activity.itemInventory)) {
+            player.sendMessage(Text.literal("活动物品箱为空，无法领取。"), false);
             return;
         }
 
-        ItemStack stack = new ItemStack(item, Math.max(1, Math.min(64, activity.itemCount)));
-        if (!player.giveItemStack(stack) && !stack.isEmpty()) {
-            player.dropItem(stack, false);
+        for (int slot = 0; slot < activity.itemInventory.size(); slot++) {
+            ItemStack rewardStack = activity.itemInventory.getStack(slot);
+            if (rewardStack.isEmpty()) {
+                continue;
+            }
+            ItemStack stack = rewardStack.copy();
+            if (!player.giveItemStack(stack) && !stack.isEmpty()) {
+                player.dropItem(stack, false);
+            }
         }
         activity.itemClaimedPlayers.add(player.getUuid());
-        player.sendMessage(Text.literal("已领取活动物品：" + activity.itemId + " x" + activity.itemCount), false);
+        player.sendMessage(Text.literal("已领取活动物品：" + itemSummary(activity.itemInventory, "活动物品箱")), false);
         ModNetworking.sendLiveData(player);
     }
 
@@ -217,6 +251,7 @@ public final class ActivityManager {
         }
         if (activity != null && viewer != null && "item_give".equals(activity.category)) {
             activity.itemClaimedByViewer = activity.itemClaimedPlayers.contains(viewer.getUuid());
+            activity.itemSummary = itemSummary(activity.itemInventory, activity.itemSummary);
         }
         return activity == null ? "" : FriendServerMenuMod.GSON.toJson(activity);
     }
@@ -228,7 +263,7 @@ public final class ActivityManager {
         return activeActivity;
     }
 
-    private static String validate(SubmittedActivity submitted) {
+    private static String validate(SubmittedActivity submitted, SimpleInventory draftItemInventory) {
         if (submitted == null) {
             return "活动数据为空。";
         }
@@ -249,12 +284,8 @@ public final class ActivityManager {
             }
         }
         if ("item_give".equals(category)) {
-            Identifier itemId = Identifier.tryParse(safe(submitted.itemId).trim());
-            if (itemId == null || Registries.ITEM.getOptionalValue(itemId).orElse(Items.AIR) == Items.AIR) {
-                return "发物品模板的物品 ID 无效。";
-            }
-            if (submitted.itemCount < 1 || submitted.itemCount > 64) {
-                return "发放数量需要在 1 到 64 之间。";
+            if (!hasItems(draftItemInventory)) {
+                return "请先打开发物品箱，并放入至少一个要发放的物品。";
             }
         }
         if ("maintenance".equals(category)) {
@@ -293,7 +324,7 @@ public final class ActivityManager {
             player.sendMessage(Text.literal("结束日期：" + activity.endDateText).formatted(Formatting.LIGHT_PURPLE), false);
         }
         if ("item_give".equals(activity.category)) {
-            player.sendMessage(Text.literal("可领取物品：" + activity.itemId + " x" + activity.itemCount).formatted(Formatting.AQUA), false);
+            player.sendMessage(Text.literal("可领取物品：" + itemSummary(activity.itemInventory, activity.itemSummary)).formatted(Formatting.AQUA), false);
             MutableText claimHint = Text.literal("领取：").formatted(Formatting.GREEN)
                     .append(Text.literal("[手动领取]").styled(style -> style
                             .withColor(Formatting.GREEN)
@@ -313,12 +344,87 @@ public final class ActivityManager {
         }
     }
 
-    private static Item activityItem(ActiveActivity activity) {
-        Identifier itemId = Identifier.tryParse(activity.itemId);
-        if (itemId == null) {
-            return Items.AIR;
+    private static SimpleInventory draftItemInventory(ServerPlayerEntity player) {
+        return DRAFT_ITEM_INVENTORIES.computeIfAbsent(player.getUuid(), ignored -> new SimpleInventory(ACTIVITY_ITEM_INVENTORY_SIZE));
+    }
+
+    private static void copyInventory(SimpleInventory source, SimpleInventory target) {
+        if (source == null || target == null) {
+            return;
         }
-        return Registries.ITEM.getOptionalValue(itemId).orElse(Items.AIR);
+        int size = Math.min(source.size(), target.size());
+        for (int slot = 0; slot < size; slot++) {
+            ItemStack stack = source.getStack(slot);
+            target.setStack(slot, stack.isEmpty() ? ItemStack.EMPTY : stack.copy());
+        }
+    }
+
+    private static void clearInventory(SimpleInventory inventory) {
+        if (inventory == null) {
+            return;
+        }
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            inventory.setStack(slot, ItemStack.EMPTY);
+        }
+    }
+
+    private static boolean hasItems(SimpleInventory inventory) {
+        if (inventory == null) {
+            return false;
+        }
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (!inventory.getStack(slot).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int totalItemCount(SimpleInventory inventory) {
+        if (inventory == null) {
+            return 0;
+        }
+        int total = 0;
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (!stack.isEmpty()) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    private static String itemSummary(SimpleInventory inventory, String fallback) {
+        LinkedHashMap<String, Integer> itemCounts = new LinkedHashMap<>();
+        if (inventory != null) {
+            for (int slot = 0; slot < inventory.size(); slot++) {
+                ItemStack stack = inventory.getStack(slot);
+                if (stack.isEmpty()) {
+                    continue;
+                }
+                itemCounts.merge(stack.getName().getString(), stack.getCount(), Integer::sum);
+            }
+        }
+        if (itemCounts.isEmpty()) {
+            return textOr(fallback, "活动物品箱");
+        }
+
+        StringBuilder builder = new StringBuilder();
+        int rendered = 0;
+        for (Map.Entry<String, Integer> entry : itemCounts.entrySet()) {
+            if (rendered > 0) {
+                builder.append("，");
+            }
+            builder.append(entry.getKey()).append(" x").append(entry.getValue());
+            rendered++;
+            if (rendered >= 3) {
+                break;
+            }
+        }
+        if (itemCounts.size() > rendered) {
+            builder.append(" 等");
+        }
+        return builder.toString();
     }
 
     private static long parseEndDate(String value) {
@@ -379,6 +485,11 @@ public final class ActivityManager {
         return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
+    private static String textOr(String value, String fallback) {
+        String text = safe(value).trim();
+        return text.isEmpty() ? fallback : text;
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value;
     }
@@ -409,12 +520,14 @@ public final class ActivityManager {
         public String endDateText;
         public String itemId;
         public int itemCount;
+        public String itemSummary;
         public String maintenanceTimeText;
         public int maintenanceCountdownSeconds;
         public long maintenanceEndsAtMillis;
         public int maintenanceRemainingSeconds;
         public int lastMaintenanceReminderSeconds;
         public boolean itemClaimedByViewer;
+        public transient SimpleInventory itemInventory = new SimpleInventory(ACTIVITY_ITEM_INVENTORY_SIZE);
         public transient Set<UUID> notifiedPlayers = new HashSet<>();
         public transient Set<UUID> itemClaimedPlayers = new HashSet<>();
         public String world;
