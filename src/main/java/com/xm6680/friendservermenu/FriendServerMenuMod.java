@@ -14,6 +14,7 @@ import com.xm6680.friendservermenu.server.AdminActionManager;
 import com.xm6680.friendservermenu.server.ActivityManager;
 import com.xm6680.friendservermenu.server.DeathPointManager;
 import com.xm6680.friendservermenu.server.PlayerSettingsManager;
+import com.xm6680.friendservermenu.server.ServerDrivenUiManager;
 import com.xm6680.friendservermenu.server.ServerFeatureSettingsManager;
 import com.xm6680.friendservermenu.server.TaskManager;
 import net.fabricmc.api.ModInitializer;
@@ -60,6 +61,7 @@ public class FriendServerMenuMod implements ModInitializer {
                         ModNetworking.sendMenu(handler.player, "setup");
                     }
                 }));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> ServerDrivenUiManager.remove(handler.player));
         MenuCommand.register();
         AdminMenuCommand.register();
         ActivityClaimCommand.register();

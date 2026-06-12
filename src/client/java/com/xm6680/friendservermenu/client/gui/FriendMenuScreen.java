@@ -14,6 +14,7 @@ import com.xm6680.friendservermenu.network.MenuActionPayload;
 import com.xm6680.friendservermenu.network.MenuDataPayload;
 import com.xm6680.friendservermenu.network.PlayerSettingsPayload;
 import com.xm6680.friendservermenu.network.RequestMenuDataPayload;
+import com.xm6680.friendservermenu.network.ServerDrivenUiPayload;
 import com.xm6680.friendservermenu.network.ServerFeatureSettingsPayload;
 import com.xm6680.friendservermenu.network.ServerStatusPayload;
 import com.xm6680.friendservermenu.network.TaskActionPayload;
@@ -73,6 +74,7 @@ public class FriendMenuScreen extends Screen {
     private ClientStatus serverStatus = ClientStatus.empty();
     private ClientPlayerSettings playerSettings = new ClientPlayerSettings();
     private ClientServerFeatureSettings serverFeatureSettings = new ClientServerFeatureSettings();
+    private ServerUiDefinition serverUiDefinition;
     private ActiveActivity activeActivity;
     private List<ClientTask> tasks = List.of();
     private long activeActivityReceivedAtMillis;
@@ -179,6 +181,18 @@ public class FriendMenuScreen extends Screen {
         }
     }
 
+    public void applyServerDrivenUi(ServerDrivenUiPayload payload) {
+        if (payload == null || payload.protocolVersion() != 1 || safe(payload.uiJson()).isBlank()) {
+            this.serverUiDefinition = null;
+            return;
+        }
+        try {
+            this.serverUiDefinition = FriendServerMenuMod.GSON.fromJson(payload.uiJson(), ServerUiDefinition.class);
+        } catch (Exception ignored) {
+            this.serverUiDefinition = null;
+        }
+    }
+
     @Override
     public void tick() {
         refreshTicks++;
@@ -217,7 +231,7 @@ public class FriendMenuScreen extends Screen {
 
         String menuTitle = textRenderer.trimToWidth(titleText, Math.max(40, layout.navWidth() - 32));
         context.drawText(textRenderer, Text.literal(menuTitle), layout.panelX() + 18, layout.panelY() + 24, 0xFFFFFFFF, true);
-        context.drawText(textRenderer, Text.literal(selectedPage.label), layout.contentX(), layout.panelY() + 16, 0xFFFFFFFF, true);
+        context.drawText(textRenderer, Text.literal(pageLabel(selectedPage)), layout.contentX(), layout.panelY() + 16, 0xFFFFFFFF, true);
         context.drawText(textRenderer, Text.literal(pageDescription(selectedPage)), layout.contentX(), layout.panelY() + 34, 0xFF9FAAB4, false);
         renderCloseButton(context, mouseX, mouseY, layout);
 
@@ -229,29 +243,32 @@ public class FriendMenuScreen extends Screen {
         activeMouseY = mouseY;
         context.enableScissor(layout.contentX() - CONTENT_SCISSOR_PADDING, layout.contentY() - CONTENT_SCISSOR_PADDING,
                 layout.contentX() + layout.contentWidth() + CONTENT_SCISSOR_PADDING, layout.contentBottom() + CONTENT_SCISSOR_PADDING);
-        int pageBottom = switch (selectedPage) {
-            case TELEPORT -> renderTeleportPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case SETUP -> renderSetupPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ADD_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
-            case EDIT_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
-            case COORDINATES -> renderCoordinatePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case COORDINATE_HUD_EDIT -> renderCoordinateHudEditPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case TASKS -> renderTasksPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case TASK_HISTORY -> renderTaskHistoryPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case TASK_DETAIL -> renderTaskDetailPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case CREATE_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
-            case EDIT_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
-            case TASK_HUD_EDIT -> renderTaskHudEditPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ACTIVITY -> renderActivityPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case STATUS -> renderStatusPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case SETTINGS -> renderSettingsPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ADMIN -> renderAdminPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ADMIN_TIME -> renderAdminTimePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ADMIN_WEATHER -> renderAdminWeatherPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ADMIN_PLAYERS -> renderAdminPlayersPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ADMIN_PLAYER_DETAIL -> renderAdminPlayerDetailPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-            case ADMIN_CLEANUP -> renderAdminCleanupPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
-        };
+        ServerUiPage serverPage = serverDrivenPage(selectedPage);
+        int pageBottom = serverPage != null
+                ? renderServerDrivenPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), serverPage)
+                : switch (selectedPage) {
+                    case TELEPORT -> renderTeleportPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case SETUP -> renderSetupPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ADD_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
+                    case EDIT_LOCATION -> renderLocationFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
+                    case COORDINATES -> renderCoordinatePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case COORDINATE_HUD_EDIT -> renderCoordinateHudEditPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case TASKS -> renderTasksPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case TASK_HISTORY -> renderTaskHistoryPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case TASK_DETAIL -> renderTaskDetailPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case CREATE_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), false);
+                    case EDIT_TASK -> renderTaskFormPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth(), true);
+                    case TASK_HUD_EDIT -> renderTaskHudEditPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ACTIVITY -> renderActivityPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case STATUS -> renderStatusPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case SETTINGS -> renderSettingsPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ADMIN -> renderAdminPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ADMIN_TIME -> renderAdminTimePage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ADMIN_WEATHER -> renderAdminWeatherPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ADMIN_PLAYERS -> renderAdminPlayersPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ADMIN_PLAYER_DETAIL -> renderAdminPlayerDetailPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                    case ADMIN_CLEANUP -> renderAdminCleanupPage(context, layout.contentX(), layout.contentY() - contentScroll, layout.contentWidth());
+                };
         context.disableScissor();
         activeRenderContext = null;
         activeRenderLayout = null;
@@ -475,7 +492,7 @@ public class FriendMenuScreen extends Screen {
             if (selected) {
                 context.fill(buttonX + 3, y + 4, buttonX + 7, y + NAV_BUTTON_HEIGHT - 4, 0xFF7FC2FF);
             }
-            String label = textRenderer.trimToWidth(page.label, Math.max(20, buttonWidth - 22));
+            String label = textRenderer.trimToWidth(pageLabel(page), Math.max(20, buttonWidth - 22));
             int textX = buttonX + Math.max(8, (buttonWidth - textRenderer.getWidth(label)) / 2);
             int textY = y + Math.max(7, (NAV_BUTTON_HEIGHT - textRenderer.fontHeight) / 2);
             context.drawText(textRenderer, Text.literal(label), textX, textY, selected ? 0xFFFFFFFF : 0xFFD1DAE2, false);
@@ -1281,6 +1298,118 @@ public class FriendMenuScreen extends Screen {
         }
         addButton("发送活动通知", "", "activity_submit", "", true, x + 8, formY + 4, 112, 24);
         return y + formCardHeight + 10;
+    }
+
+    private int renderServerDrivenPage(DrawContext context, int x, int y, int contentWidth, ServerUiPage page) {
+        int cardWidth = contentWidth - 2;
+        if (page.cards == null || page.cards.isEmpty()) {
+            drawCard(context, x - 4, y - 4, cardWidth, 58);
+            drawSectionTitle(context, "服务端页面", x + 8, y + 8);
+            drawHintText(context, "服务端没有下发这个页面的内容。", x + 8, y + 32, cardWidth - 22);
+            return y + 66;
+        }
+
+        boolean twoColumns = page.allowColumns && cardWidth >= 560 && page.cards.size() > 1;
+        if (!twoColumns) {
+            for (ServerUiCard card : page.cards) {
+                int height = serverDrivenCardHeight(card, cardWidth);
+                renderServerDrivenCard(context, card, x, y, cardWidth, height);
+                y += height + 10;
+            }
+            return y;
+        }
+
+        int gap = 12;
+        int columnWidth = (cardWidth - gap) / 2;
+        int leftY = y;
+        int rightY = y;
+        for (ServerUiCard card : page.cards) {
+            boolean useLeft = leftY <= rightY;
+            int cardX = useLeft ? x : x + columnWidth + gap;
+            int cardY = useLeft ? leftY : rightY;
+            int height = serverDrivenCardHeight(card, columnWidth);
+            renderServerDrivenCard(context, card, cardX, cardY, columnWidth, height);
+            if (useLeft) {
+                leftY += height + 10;
+            } else {
+                rightY += height + 10;
+            }
+        }
+        return Math.max(leftY, rightY);
+    }
+
+    private void renderServerDrivenCard(DrawContext context, ServerUiCard card, int x, int y, int width, int height) {
+        drawCard(context, x - 4, y - 4, width, height);
+        drawSectionTitle(context, textOr(card.title, "服务端卡片"), x + 8, y + 8);
+        int cursorY = y + 32;
+        if (card.lines != null) {
+            for (String line : card.lines) {
+                drawHintText(context, line, x + 8, cursorY, width - 22);
+                cursorY += 14;
+            }
+        }
+        if (card.buttons == null || card.buttons.isEmpty()) {
+            return;
+        }
+
+        cursorY += 8;
+        int buttonX = x + 8;
+        int rowHeight = 0;
+        int rowRight = x + width - 8;
+        for (ServerUiButton button : card.buttons) {
+            int buttonWidth = Math.max(48, Math.min(Math.max(48, button.width), width - 16));
+            int buttonHeight = Math.max(20, button.height <= 0 ? 24 : button.height);
+            if (buttonX + buttonWidth > rowRight && buttonX > x + 8) {
+                buttonX = x + 8;
+                cursorY += rowHeight + 6;
+                rowHeight = 0;
+            }
+            addStyledButton(textOr(button.label, "按钮"), safe(button.description), safe(button.actionId), safe(button.argument),
+                    button.localOnly, buttonX, cursorY, buttonWidth, buttonHeight, serverButtonVariant(button));
+            buttonX += buttonWidth + 6;
+            rowHeight = Math.max(rowHeight, buttonHeight);
+        }
+    }
+
+    private int serverDrivenCardHeight(ServerUiCard card, int width) {
+        int lines = card.lines == null ? 0 : card.lines.size();
+        int buttonsHeight = 0;
+        if (card.buttons != null && !card.buttons.isEmpty()) {
+            int rowRight = width - 16;
+            int buttonX = 0;
+            int rowHeight = 0;
+            for (ServerUiButton button : card.buttons) {
+                int buttonWidth = Math.max(48, Math.min(Math.max(48, button.width), width - 16));
+                int buttonHeight = Math.max(20, button.height <= 0 ? 24 : button.height);
+                if (buttonX + buttonWidth > rowRight && buttonX > 0) {
+                    buttonsHeight += rowHeight + 6;
+                    buttonX = 0;
+                    rowHeight = 0;
+                }
+                buttonX += buttonWidth + 6;
+                rowHeight = Math.max(rowHeight, buttonHeight);
+            }
+            buttonsHeight += rowHeight;
+        }
+        return Math.max(58, 36 + lines * 14 + (buttonsHeight > 0 ? 8 + buttonsHeight : 0) + 14);
+    }
+
+    private MenuButton.Variant serverButtonVariant(ServerUiButton button) {
+        return switch (safe(button.actionId)) {
+            case "coordinate_hud_toggle" -> ClientCoordinateHud.isEnabled() ? MenuButton.Variant.TOGGLE_ON : MenuButton.Variant.TOGGLE_OFF;
+            case "task_hud_toggle" -> ClientTaskHud.isEnabled() ? MenuButton.Variant.TOGGLE_ON : MenuButton.Variant.TOGGLE_OFF;
+            default -> serverButtonVariant(button.variant);
+        };
+    }
+
+    private MenuButton.Variant serverButtonVariant(String variant) {
+        return switch (safe(variant).toLowerCase(Locale.ROOT)) {
+            case "danger" -> MenuButton.Variant.DANGER;
+            case "toggle_on" -> MenuButton.Variant.TOGGLE_ON;
+            case "toggle_off" -> MenuButton.Variant.TOGGLE_OFF;
+            case "disabled" -> MenuButton.Variant.DISABLED;
+            default -> MenuButton.Variant.NORMAL;
+        };
     }
 
     private int renderStatusPage(DrawContext context, int x, int y, int contentWidth) {
@@ -2272,7 +2401,16 @@ public class FriendMenuScreen extends Screen {
         return selectedPage.isAdminPage() ? Page.ADMIN : selectedPage;
     }
 
+    private String pageLabel(Page page) {
+        ServerUiPage serverPage = serverPageById(page.id);
+        return serverPage == null ? page.label : textOr(serverPage.label, page.label);
+    }
+
     private String pageDescription(Page page) {
+        ServerUiPage serverPage = serverPageById(page.id);
+        if (serverPage != null && !safe(serverPage.description).isBlank()) {
+            return serverPage.description;
+        }
         return switch (page) {
             case SETUP -> "首次使用前设置菜单名称。";
             case TELEPORT, ADD_LOCATION, EDIT_LOCATION -> "管理公共传送点和快速传送入口。";
@@ -2282,6 +2420,33 @@ public class FriendMenuScreen extends Screen {
             case STATUS -> "查看在线人数、世界信息和服务器性能。";
             case SETTINGS -> "调整个人设置和客户端 HUD 开关。";
             case ADMIN, ADMIN_TIME, ADMIN_WEATHER, ADMIN_PLAYERS, ADMIN_PLAYER_DETAIL, ADMIN_CLEANUP -> "OP 服务器管理、活动控制和维护工具。";
+        };
+    }
+
+    private ServerUiPage serverDrivenPage(Page page) {
+        if (!serverDrivenAllowed(page)) {
+            return null;
+        }
+        ServerUiPage serverPage = serverPageById(page.id);
+        return serverPage == null || serverPage.cards == null ? null : serverPage;
+    }
+
+    private ServerUiPage serverPageById(String pageId) {
+        if (serverUiDefinition == null || serverUiDefinition.pages == null || safe(pageId).isBlank()) {
+            return null;
+        }
+        for (ServerUiPage page : serverUiDefinition.pages) {
+            if (pageId.equals(safe(page.id))) {
+                return page;
+            }
+        }
+        return null;
+    }
+
+    private boolean serverDrivenAllowed(Page page) {
+        return switch (page) {
+            case TELEPORT, COORDINATES, STATUS, SETTINGS, ADMIN -> true;
+            default -> false;
         };
     }
 
@@ -3172,6 +3337,37 @@ public class FriendMenuScreen extends Screen {
     private static class ClientServerFeatureSettings {
         boolean deathPointEnabled = true;
         boolean deathPointChatEnabled = true;
+    }
+
+    private static class ServerUiDefinition {
+        int protocolVersion;
+        long revision;
+        List<ServerUiPage> pages = List.of();
+    }
+
+    private static class ServerUiPage {
+        String id;
+        String label;
+        String description;
+        boolean allowColumns;
+        List<ServerUiCard> cards = List.of();
+    }
+
+    private static class ServerUiCard {
+        String title;
+        List<String> lines = List.of();
+        List<ServerUiButton> buttons = List.of();
+    }
+
+    private static class ServerUiButton {
+        String label;
+        String description;
+        String actionId;
+        String argument;
+        boolean localOnly;
+        String variant;
+        int width = 88;
+        int height = 24;
     }
 
     private static class ClientDeathPoint {

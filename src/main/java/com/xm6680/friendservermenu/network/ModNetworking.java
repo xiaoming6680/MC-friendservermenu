@@ -7,6 +7,7 @@ import com.xm6680.friendservermenu.server.DeathPointManager;
 import com.xm6680.friendservermenu.server.PlayerSettingsManager;
 import com.xm6680.friendservermenu.server.ServerFeatureSettingsManager;
 import com.xm6680.friendservermenu.server.ServerActionHandler;
+import com.xm6680.friendservermenu.server.ServerDrivenUiManager;
 import com.xm6680.friendservermenu.server.StatusManager;
 import com.xm6680.friendservermenu.server.TaskManager;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -25,9 +26,11 @@ public final class ModNetworking {
         PayloadTypeRegistry.playS2C().register(LocationMutationResultPayload.ID, LocationMutationResultPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(PlayerSettingsPayload.ID, PlayerSettingsPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(ServerFeatureSettingsPayload.ID, ServerFeatureSettingsPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(ServerDrivenUiPayload.ID, ServerDrivenUiPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(MenuActionPayload.ID, MenuActionPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestMenuDataPayload.ID, RequestMenuDataPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestOpenMenuPayload.ID, RequestOpenMenuPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(ClientUiCapabilitiesPayload.ID, ClientUiCapabilitiesPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(AddLocationPayload.ID, AddLocationPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(EditLocationPayload.ID, EditLocationPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(DeleteLocationPayload.ID, DeleteLocationPayload.CODEC);
@@ -43,6 +46,8 @@ public final class ModNetworking {
                 context.server().execute(() -> sendLiveData(context.player())));
         ServerPlayNetworking.registerGlobalReceiver(RequestOpenMenuPayload.ID, (payload, context) ->
                 context.server().execute(() -> sendMenu(context.player(), "")));
+        ServerPlayNetworking.registerGlobalReceiver(ClientUiCapabilitiesPayload.ID, (payload, context) ->
+                context.server().execute(() -> ServerDrivenUiManager.updateCapabilities(context.player(), payload)));
         ServerPlayNetworking.registerGlobalReceiver(AddLocationPayload.ID, (payload, context) ->
                 context.server().execute(() -> ServerActionHandler.handleAddLocation(context.player(), payload)));
         ServerPlayNetworking.registerGlobalReceiver(EditLocationPayload.ID, (payload, context) ->
@@ -84,6 +89,7 @@ public final class ModNetworking {
         if (canUseAdmin(player)) {
             sendServerFeatureSettings(player);
         }
+        ServerDrivenUiManager.sendUiDefinition(player);
     }
 
     public static void sendStatus(ServerPlayerEntity player) {
